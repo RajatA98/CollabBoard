@@ -9,27 +9,22 @@ describe('Toolbar', () => {
     expect(screen.getByTestId('toolbar')).toBeInTheDocument();
   });
 
-  it('should render sticky note and rectangle buttons', () => {
-    render(<Toolbar onAddStickyNote={vi.fn()} onAddRectangle={vi.fn()} />);
-    expect(screen.getByRole('button', { name: /sticky note/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /rectangle/i })).toBeInTheDocument();
+  it('should render toolbar brand', () => {
+    render(<Toolbar />);
+    expect(screen.getByText('CollabBoard')).toBeInTheDocument();
   });
 
-  it('should call onAddStickyNote when sticky note button is clicked', async () => {
-    const user = userEvent.setup();
-    const mockAddStickyNote = vi.fn();
-    render(<Toolbar onAddStickyNote={mockAddStickyNote} />);
-
-    await user.click(screen.getByRole('button', { name: /sticky note/i }));
-    expect(mockAddStickyNote).toHaveBeenCalled();
+  it('should render logout button when onLogout is provided', () => {
+    render(<Toolbar onLogout={vi.fn()} />);
+    expect(screen.getByRole('button', { name: /logout/i })).toBeInTheDocument();
   });
 
-  it('should call onAddRectangle when rectangle button is clicked', async () => {
+  it('should call onLogout when logout button is clicked', async () => {
     const user = userEvent.setup();
-    const mockAddRectangle = vi.fn();
-    render(<Toolbar onAddRectangle={mockAddRectangle} />);
+    const mockLogout = vi.fn();
+    render(<Toolbar onLogout={mockLogout} />);
 
-    await user.click(screen.getByRole('button', { name: /rectangle/i }));
-    expect(mockAddRectangle).toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: /logout/i }));
+    expect(mockLogout).toHaveBeenCalled();
   });
 });
