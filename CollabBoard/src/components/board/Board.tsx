@@ -23,8 +23,8 @@ export function Board() {
   const { boardId = 'default' } = useParams();
   const { user, logout } = useAuth();
   const { objects, addObject, updateObject, deleteObject, clearObjects } = useBoardObjects(boardId);
-  const { cursors, updateCursor } = useCursors(boardId, user);
-  const { onlineUsers } = usePresence(boardId, user);
+  const { cursors, updateCursor, cleanupCursor } = useCursors(boardId, user);
+  const { onlineUsers, cleanupPresence } = usePresence(boardId, user);
   const { viewport, setPosition, zoomAtPoint } = useViewport();
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; objectId: string } | null>(null);
@@ -51,7 +51,9 @@ export function Board() {
     objectCount: objects.length, 
     objects, 
     viewport,
-    editingObject: editingObject ? editingObject.id : null 
+    editingObject: editingObject ? editingObject.id : null,
+    remoteCursors: cursors,
+    remoteCursorCount: Object.keys(cursors).length 
   });
 
   const createObjectAtCenter = useCallback((type: 'rectangle' | 'sticky') => {
@@ -330,6 +332,17 @@ export function Board() {
     await clearObjects();
   }, [objects.length, clearObjects]);
 
+  const handleLogout = useCallback(async () => {
+    console.log('🚪 Board: Logout initiated, cleaning up presence and cursor data');
+    // Clean up presence and cursor BEFORE logout
+    await Promise.all([
+      cleanupPresence(),
+      cleanupCursor(),
+    ]);
+    console.log('🚪 Board: Cleanup complete, proceeding with logout');
+    await logout();
+  }, [cleanupPresence, cleanupCursor, logout]);
+
   const selectedObject = objects.find((obj) => obj.id === selectedObjectId) || null;
   const contextMenuObject = contextMenu
     ? objects.find((obj) => obj.id === contextMenu.objectId) || null
@@ -337,7 +350,7 @@ export function Board() {
 
   return (
     <div className="board-container">
-      <Toolbar onLogout={logout} />
+      <Toolbar onLogout={handleLogout} />
       <div className="board-content">
         <ShapeSidebar
           onShapeClick={createObjectAtCenter}
