@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { LoginForm } from './LoginForm';
 import { SignupForm } from './SignupForm';
 import { useAuth } from '../../hooks/useAuth';
@@ -7,6 +7,7 @@ import { useAuth } from '../../hooks/useAuth';
 export function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
+  const navigate = useNavigate();
   const { user, loading, login, signup, error, clearError } = useAuth();
 
   if (loading) {
@@ -30,11 +31,17 @@ export function AuthPage() {
   };
 
   const handleLogin = async (email: string, password: string) => {
-    await login(email, password);
+    const ok = await login(email, password);
+    if (ok) {
+      navigate('/board/default', { replace: true });
+    }
   };
 
   const handleSignup = async (email: string, password: string, displayName: string) => {
-    await signup(email, password, displayName);
+    const ok = await signup(email, password, displayName);
+    if (ok) {
+      navigate('/board/default', { replace: true });
+    }
   };
 
   return (
