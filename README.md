@@ -117,6 +117,7 @@ Shows online users with:
 - **[FIREBASE_RULES_DEPLOYMENT.md](FIREBASE_RULES_DEPLOYMENT.md)** - Firebase rules deployment
 - **[CURSOR_TESTING_INSTRUCTIONS.md](CURSOR_TESTING_INSTRUCTIONS.md)** - Testing guide
 - **[CURSOR_FIX_SUMMARY.md](CURSOR_FIX_SUMMARY.md)** - Technical implementation details
+- **[CONFLICTS.md](CONFLICTS.md)** - Conflict resolution (last-write-wins) for simultaneous edits
 
 ## 🛠️ Tech Stack
 

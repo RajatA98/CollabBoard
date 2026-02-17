@@ -63,7 +63,7 @@ Now users can see all cursors while only being able to update their own.
 1. Go to [Firebase Console](https://console.firebase.google.com/)
 2. Select your project: **collabboard-fe299**
 3. Navigate to **Realtime Database** → **Rules** tab
-4. Replace the entire rules with:
+4. Replace the entire rules with the contents of `database.rules.json` (includes cursors, presence, transforms, editing):
 
 ```json
 {
@@ -72,21 +72,31 @@ Now users can see all cursors while only being able to update their own.
       "$boardId": {
         "cursors": {
           ".read": "auth != null",
-          "$userId": {
-            ".write": "auth != null && auth.uid === $userId"
-          }
+          "$userId": { ".write": "auth != null && auth.uid === $userId" }
         },
         "presence": {
           ".read": "auth != null",
-          "$userId": {
-            ".write": "auth != null && auth.uid === $userId"
-          }
+          "$userId": { ".write": "auth != null && auth.uid === $userId" }
+        },
+        "transforms": {
+          ".read": "auth != null",
+          "$userId": { ".write": "auth != null && auth.uid === $userId" }
+        },
+        "editing": {
+          ".read": "auth != null",
+          "$userId": { ".write": "auth != null && auth.uid === $userId" }
         }
       }
     }
   }
 }
 ```
+
+**Paths and what they enable:**
+- `cursors` – real-time multiplayer cursor positions
+- `presence` – online user list (who's on the board)
+- `transforms` – live drag/resize/rotate of shapes
+- `editing` – live typing in sticky notes
 
 5. Click **Publish**
 
@@ -112,9 +122,20 @@ I've added comprehensive error handling that will show specific error messages i
 - `❌ Firebase RTDB: Failed to set cursor: ...`
 - `❌ Firebase RTDB: This might be a permissions issue. Check Firebase RTDB rules.`
 
+## RTDB Paths and Permissions Reference
+
+| Path | Read | Write | Purpose |
+|------|------|-------|---------|
+| `boards/$boardId/cursors` | Any authenticated user | Own `$userId` only | Real-time cursor positions |
+| `boards/$boardId/presence` | Any authenticated user | Own `$userId` only | Online users ("N online") |
+| `boards/$boardId/transforms` | Any authenticated user | Own `$userId` only | Live drag/resize/rotate |
+| `boards/$boardId/editing` | Any authenticated user | Own `$userId` only | Live typing in stickies |
+
+All four paths must have these rules deployed for real-time edits, presence, cursors, and transforms to work.
+
 ## Security Notes
 
-The new rules are still secure:
+The rules are secure:
 - ✅ **Read**: Any authenticated user can see cursors/presence (needed for collaboration)
 - ✅ **Write**: Users can only update their OWN cursor/presence data
 - ✅ **Authentication required**: Anonymous users cannot access data

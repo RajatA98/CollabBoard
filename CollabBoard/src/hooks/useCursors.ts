@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { setCursor, onCursorsChange, setupCursorDisconnect, removeCursor } from '../firebase/rtdb';
+import { setCursor, setPresence, onCursorsChange, setupCursorDisconnect, removeCursor } from '../firebase/rtdb';
 import { hashColor, filterRemoteCursors, shouldThrottleCursorUpdate } from '../utils/cursor';
+import { createPresenceData } from '../utils/presence';
 import type { AppUser, CursorData } from '../types';
 
 const THROTTLE_MS = 30;
@@ -29,6 +30,7 @@ export function useCursors(boardId: string, user: AppUser | null) {
         console.error('❌ useCursors: Failed to remove cursor:', error);
       }
       currentUserRef.current = null;
+      isCleaningUpRef.current = false;
     }
   }, []);
 
@@ -38,16 +40,10 @@ export function useCursors(boardId: string, user: AppUser | null) {
       return;
     }
 
-    // Prevent setting up cursor if we're in the middle of cleanup
-    if (isCleaningUpRef.current) {
-      console.log('👁️ useCursors: Cleanup in progress, skipping cursor setup');
-      return;
-    }
+    // Reset cleanup flag - we're setting up (fresh mount or after board/user change)
+    isCleaningUpRef.current = false;
 
     console.log('👁️ useCursors: Setting up cursor tracking for', user.displayName || user.email, 'on board', boardId);
-    
-    // Reset cleanup flag when setting up fresh
-    isCleaningUpRef.current = false;
     
     // Store current user info for cleanup
     currentUserRef.current = { boardId, userId: user.uid };
@@ -82,15 +78,25 @@ export function useCursors(boardId: string, user: AppUser | null) {
       if (shouldThrottleCursorUpdate(lastUpdateRef.current, THROTTLE_MS)) return;
       lastUpdateRef.current = Date.now();
 
+      const now = Date.now();
       const cursorData: CursorData = {
         x,
         y,
         name: user.displayName || user.email,
         color: hashColor(user.uid),
-        lastActive: Date.now(),
+        lastActive: now,
       };
-      console.log('👁️ useCursors: Sending cursor update to Firebase RTDB:', cursorData);
       setCursor(boardId, user.uid, cursorData);
+      // Heartbeat presence when cursor updates - keeps presence in sync; if cursor is active, user is online
+      const presenceData = createPresenceData(
+        user.displayName || user.email,
+        user.email,
+        hashColor(user.uid),
+        now
+      );
+      setPresence(boardId, user.uid, presenceData).catch((err) =>
+        console.error('❌ useCursors: Failed to heartbeat presence:', err)
+      );
     },
     [boardId, user]
   );

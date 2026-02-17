@@ -13,6 +13,18 @@
           "$userId": {
             ".write": "auth != null && auth.uid === $userId"
           }
+        },
+        "transforms": {
+          ".read": "auth != null",
+          "$userId": {
+            ".write": "auth != null && auth.uid === $userId"
+          }
+        },
+        "editing": {
+          ".read": "auth != null",
+          "$userId": {
+            ".write": "auth != null && auth.uid === $userId"
+          }
         }
       }
     }
