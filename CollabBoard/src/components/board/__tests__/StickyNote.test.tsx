@@ -1,0 +1,57 @@
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { StickyNote } from '../StickyNote';
+import type { BoardObject } from '../../../types';
+
+vi.mock('react-konva', () => ({
+  Group: ({ children, onClick }: Record<string, unknown>) => (
+    <div data-testid="sticky-group" onClick={onClick as () => void}>
+      {children as React.ReactNode}
+    </div>
+  ),
+  Rect: (props: Record<string, unknown>) => <div data-testid="sticky-rect" data-fill={props.fill} data-width={props.width} data-height={props.height} />,
+  Text: (props: Record<string, unknown>) => <div data-testid="sticky-text">{props.text as string}</div>,
+}));
+
+const mockObject: BoardObject = {
+  id: 'sticky-1',
+  type: 'sticky',
+  x: 100,
+  y: 200,
+  width: 150,
+  height: 100,
+  rotation: 0,
+  text: 'Hello World',
+  color: '#FFE066',
+  createdBy: 'user-1',
+  createdAt: Date.now(),
+  updatedAt: Date.now(),
+  updatedBy: 'user-1',
+};
+
+describe('StickyNote', () => {
+  it('should render with text content', () => {
+    render(<StickyNote object={mockObject} isSelected={false} onSelect={vi.fn()} onUpdate={vi.fn()} />);
+    expect(screen.getByText('Hello World')).toBeInTheDocument();
+  });
+
+  it('should render with correct color', () => {
+    render(<StickyNote object={mockObject} isSelected={false} onSelect={vi.fn()} onUpdate={vi.fn()} />);
+    const rect = screen.getByTestId('sticky-rect');
+    expect(rect).toHaveAttribute('data-fill', '#FFE066');
+  });
+
+  it('should call onSelect when clicked', async () => {
+    const mockSelect = vi.fn();
+    render(<StickyNote object={mockObject} isSelected={false} onSelect={mockSelect} onUpdate={vi.fn()} />);
+    screen.getByTestId('sticky-group').click();
+    expect(mockSelect).toHaveBeenCalled();
+  });
+
+  it('should render with correct dimensions', () => {
+    render(<StickyNote object={mockObject} isSelected={false} onSelect={vi.fn()} onUpdate={vi.fn()} />);
+    const rect = screen.getByTestId('sticky-rect');
+    expect(rect).toHaveAttribute('data-width', '150');
+    expect(rect).toHaveAttribute('data-height', '100');
+  });
+});
