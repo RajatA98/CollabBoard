@@ -26,3 +26,16 @@ export function filterRemoteCursors(
 export function shouldThrottleCursorUpdate(lastUpdate: number, throttleMs: number): boolean {
   return Date.now() - lastUpdate < throttleMs;
 }
+
+export function filterRemoteData<T>(
+  allData: Record<string, T>,
+  localUserId: string
+): Record<string, T> {
+  const filtered: Record<string, T> = {};
+  for (const [uid, data] of Object.entries(allData)) {
+    if (uid !== localUserId) {
+      filtered[uid] = data;
+    }
+  }
+  return filtered;
+}

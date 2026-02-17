@@ -12,6 +12,8 @@ import { useBoardObjects } from '../../hooks/useBoardObjects';
 import { useCursors } from '../../hooks/useCursors';
 import { usePresence } from '../../hooks/usePresence';
 import { useViewport } from '../../hooks/useViewport';
+import { useLiveTransforms } from '../../hooks/useLiveTransforms';
+import { useLiveEditing } from '../../hooks/useLiveEditing';
 import { screenToWorld } from '../../utils/coordinates';
 import type { BoardObject } from '../../types';
 
@@ -26,6 +28,8 @@ export function Board() {
   const { cursors, updateCursor, cleanupCursor } = useCursors(boardId, user);
   const { onlineUsers, cleanupPresence } = usePresence(boardId, user);
   const { viewport, setPosition, zoomAtPoint } = useViewport();
+  const { remoteTransforms, broadcastTransform, clearTransform, cleanupTransform } = useLiveTransforms(boardId, user);
+  const { remoteEditings, broadcastEditing, clearEditing, cleanupEditing } = useLiveEditing(boardId, user);
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; objectId: string } | null>(null);
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
@@ -153,16 +157,13 @@ export function Board() {
 
   const handleTextSubmit = useCallback(
     (text: string) => {
-      console.log('💾 handleTextSubmit called', { text, editingObject });
       if (editingObject) {
-        console.log('✅ Saving text to object:', editingObject.id);
         updateObject(editingObject.id, { text });
+        clearEditing();
         setEditingObject(null);
-      } else {
-        console.error('❌ No editing object found');
       }
     },
-    [editingObject, updateObject]
+    [editingObject, updateObject, clearEditing]
   );
 
   const handleMouseMove = useCallback(
@@ -333,15 +334,14 @@ export function Board() {
   }, [objects.length, clearObjects]);
 
   const handleLogout = useCallback(async () => {
-    console.log('🚪 Board: Logout initiated, cleaning up presence and cursor data');
-    // Clean up presence and cursor BEFORE logout
     await Promise.all([
       cleanupPresence(),
       cleanupCursor(),
+      cleanupTransform(),
+      cleanupEditing(),
     ]);
-    console.log('🚪 Board: Cleanup complete, proceeding with logout');
     await logout();
-  }, [cleanupPresence, cleanupCursor, logout]);
+  }, [cleanupPresence, cleanupCursor, cleanupTransform, cleanupEditing, logout]);
 
   const selectedObject = objects.find((obj) => obj.id === selectedObjectId) || null;
   const contextMenuObject = contextMenu
@@ -381,6 +381,10 @@ export function Board() {
               zoomAtPoint={zoomAtPoint}
               isEditingText={!!editingObject}
               onLiveTransformChange={setLiveTransform}
+              remoteTransforms={remoteTransforms}
+              remoteEditings={remoteEditings}
+              onBroadcastTransform={broadcastTransform}
+              onClearTransform={clearTransform}
             />
             <button
               type="button"
@@ -425,7 +429,11 @@ export function Board() {
             text={editingObject.text}
             color={objects.find(obj => obj.id === editingObject.id)?.color}
             onSubmit={handleTextSubmit}
-            onCancel={() => setEditingObject(null)}
+            onCancel={() => {
+              clearEditing();
+              setEditingObject(null);
+            }}
+            onTextChange={(text) => editingObject && broadcastEditing(editingObject.id, text)}
           />
         )}
           </div>

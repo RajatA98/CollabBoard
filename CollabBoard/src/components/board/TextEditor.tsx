@@ -9,9 +9,10 @@ interface TextEditorProps {
   color?: string;
   onSubmit: (text: string) => void;
   onCancel: () => void;
+  onTextChange?: (text: string) => void;
 }
 
-export function TextEditor({ x, y, width, height, text, color = '#FFD54F', onSubmit, onCancel }: TextEditorProps) {
+export function TextEditor({ x, y, width, height, text, color = '#FFD54F', onSubmit, onCancel, onTextChange }: TextEditorProps) {
   const [value, setValue] = useState(text);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -57,7 +58,10 @@ export function TextEditor({ x, y, width, height, text, color = '#FFD54F', onSub
         boxShadow: '2px 4px 8px rgba(0,0,0,0.3)',
       }}
       value={value}
-      onChange={(e) => setValue(e.target.value)}
+      onChange={(e) => {
+        setValue(e.target.value);
+        onTextChange?.(e.target.value);
+      }}
       onBlur={handleBlur}
       onKeyDown={handleKeyDown}
       placeholder="Type your note..."

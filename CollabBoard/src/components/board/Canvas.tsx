@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useEffect, useState } from 'react';
+import React, { useRef, useCallback, useEffect, useState, useMemo } from 'react';
 import { Stage, Layer, Transformer } from 'react-konva';
 import type Konva from 'konva';
 import { GridBackground } from './GridBackground';
@@ -6,7 +6,7 @@ import { StickyNote } from './StickyNote';
 import { Rectangle } from './Rectangle';
 import { RemoteCursor } from './RemoteCursor';
 import { DimensionLabel } from './DimensionLabel';
-import type { BoardObject, CursorData } from '../../types';
+import type { BoardObject, CursorData, LiveTransformData, LiveEditingData } from '../../types';
 
 interface CanvasProps {
   objects: BoardObject[];
@@ -31,10 +31,14 @@ interface CanvasProps {
     y: number;
     rotation: number;
   } | null) => void;
+  remoteTransforms?: Record<string, LiveTransformData>;
+  remoteEditings?: Record<string, LiveEditingData>;
+  onBroadcastTransform?: (objectId: string, x: number, y: number, width: number, height: number, rotation: number) => void;
+  onClearTransform?: () => void;
 }
 
 const ZOOM_SPEED = 1.05;
-/** Minimum size so sticky notes and shapes stay usable and don’t collapse. */
+/** Minimum size so sticky notes and shapes stay usable and don't collapse. */
 const MIN_OBJECT_SIZE = 60;
 
 export function Canvas({
@@ -54,6 +58,10 @@ export function Canvas({
   zoomAtPoint,
   isEditingText = false,
   onLiveTransformChange,
+  remoteTransforms = {},
+  remoteEditings = {},
+  onBroadcastTransform,
+  onClearTransform,
 }: CanvasProps) {
   const stageRef = useRef<Konva.Stage>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
@@ -71,6 +79,24 @@ export function Canvas({
     rotation: number;
   } | null>(null);
 
+  // Build lookup: objectId -> LiveTransformData for remote users' live transforms
+  const remoteTransformByObjectId = useMemo(() => {
+    const map: Record<string, LiveTransformData> = {};
+    for (const transform of Object.values(remoteTransforms)) {
+      map[transform.objectId] = transform;
+    }
+    return map;
+  }, [remoteTransforms]);
+
+  // Build lookup: objectId -> LiveEditingData for remote users' live editing
+  const remoteEditingByObjectId = useMemo(() => {
+    const map: Record<string, LiveEditingData> = {};
+    for (const editing of Object.values(remoteEditings)) {
+      map[editing.objectId] = editing;
+    }
+    return map;
+  }, [remoteEditings]);
+
   useEffect(() => {
     const handleResize = () => {
       setStageSize({ width: window.innerWidth, height: window.innerHeight - 48 });
@@ -78,12 +104,6 @@ export function Canvas({
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
-
-  // Debug: Log remote cursors
-  useEffect(() => {
-    console.log('👁️ Canvas: Remote cursors updated:', remoteCursors);
-    console.log('👁️ Canvas: Number of remote cursors:', Object.keys(remoteCursors).length);
-  }, [remoteCursors]);
 
   const handleWheel = useCallback(
     (e: Konva.KonvaEventObject<WheelEvent>) => {
@@ -200,6 +220,19 @@ export function Canvas({
     transformer.getLayer()?.batchDraw();
   }, [selectedObjectId]);
 
+  // Helper to create onDragMove handler for broadcasting
+  const makeDragMoveHandler = useCallback(
+    (obj: BoardObject) => (e: Konva.KonvaEventObject<DragEvent>) => {
+      const node = e.target;
+      onBroadcastTransform?.(obj.id, node.x(), node.y(), obj.width, obj.height, obj.rotation || 0);
+    },
+    [onBroadcastTransform]
+  );
+
+  const handleDragEndExtra = useCallback(() => {
+    onClearTransform?.();
+  }, [onClearTransform]);
+
   return (
     <Stage
       ref={stageRef}
@@ -222,29 +255,43 @@ export function Canvas({
         {/* Render non-selected objects first so selected object + handles draw on top */}
         {objects
           .filter((obj) => selectedObjectId !== obj.id)
-          .map((obj) =>
-            obj.type === 'sticky' ? (
+          .map((obj) => {
+            // Apply remote live transform if another user is manipulating this object
+            const remoteXform = remoteTransformByObjectId[obj.id];
+            const remoteEdit = remoteEditingByObjectId[obj.id];
+            const displayObj = remoteXform
+              ? { ...obj, x: remoteXform.x, y: remoteXform.y, width: remoteXform.width, height: remoteXform.height, rotation: remoteXform.rotation }
+              : obj;
+
+            return obj.type === 'sticky' ? (
               <StickyNote
                 key={obj.id}
-                object={obj}
+                object={displayObj}
                 isSelected={false}
                 onSelect={() => onSelectObject?.(obj.id)}
                 onUpdate={(updates) => onObjectUpdate(obj.id, updates)}
                 onDoubleClick={() => onObjectDoubleClick?.(obj)}
                 onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
+                onDragMove={makeDragMoveHandler(obj)}
+                onDragEndExtra={handleDragEndExtra}
+                remoteEditing={remoteEdit}
+                remoteTransform={remoteXform}
               />
             ) : (
               <Rectangle
                 key={obj.id}
-                object={obj}
+                object={displayObj}
                 isSelected={false}
                 onSelect={() => onSelectObject?.(obj.id)}
                 onUpdate={(updates) => onObjectUpdate(obj.id, updates)}
                 onDoubleClick={() => onObjectDoubleClick?.(obj)}
                 onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
+                onDragMove={makeDragMoveHandler(obj)}
+                onDragEndExtra={handleDragEndExtra}
+                remoteTransform={remoteXform}
               />
-            )
-          )}
+            );
+          })}
         {/* Render selected object and its TransformHandles last so they are on top */}
         {selectedObjectId &&
           objects
@@ -265,6 +312,8 @@ export function Canvas({
                     onUpdate={(updates) => onObjectUpdate(obj.id, updates)}
                     onDoubleClick={() => onObjectDoubleClick?.(obj)}
                     onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
+                    onDragMove={makeDragMoveHandler(obj)}
+                    onDragEndExtra={handleDragEndExtra}
                   />
                 ) : (
                   <Rectangle
@@ -274,6 +323,8 @@ export function Canvas({
                     onUpdate={(updates) => onObjectUpdate(obj.id, updates)}
                     onDoubleClick={() => onObjectDoubleClick?.(obj)}
                     onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
+                    onDragMove={makeDragMoveHandler(obj)}
+                    onDragEndExtra={handleDragEndExtra}
                   />
                 )}
                 <Transformer
@@ -308,7 +359,7 @@ export function Canvas({
                   }
                   rotateAnchorOffset={24}
                   boundBoxFunc={(oldBox, newBox) => {
-                    // Enforce minimum size so objects (especially sticky notes) don’t collapse
+                    // Enforce minimum size so objects (especially sticky notes) don't collapse
                     if (newBox.width < MIN_OBJECT_SIZE || newBox.height < MIN_OBJECT_SIZE) {
                       return oldBox;
                     }
@@ -353,6 +404,8 @@ export function Canvas({
 
                     setLiveTransform(liveValues);
                     onLiveTransformChange?.(liveValues);
+                    // Broadcast to remote users
+                    onBroadcastTransform?.(obj.id, liveValues.x, liveValues.y, liveValues.width, liveValues.height, liveValues.rotation);
                   }}
                   onTransformEnd={(e) => {
                     const node = e.target;
@@ -384,6 +437,8 @@ export function Canvas({
                     setTransformMode('idle');
                     isRotatingGestureRef.current = false;
                     lastRotationRef.current = node.rotation();
+                    // Clear RTDB transform
+                    onClearTransform?.();
                   }}
                   rotateAnchorCursor="grab"
                   anchorStyleFunc={(anchor) => {
@@ -425,9 +480,9 @@ export function Canvas({
                     }
                   }}
                 />
-                <DimensionLabel 
-                  object={obj} 
-                  transformMode={transformMode} 
+                <DimensionLabel
+                  object={obj}
+                  transformMode={transformMode}
                   liveTransform={liveTransform}
                 />
               </React.Fragment>
