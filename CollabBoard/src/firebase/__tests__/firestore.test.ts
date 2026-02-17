@@ -5,6 +5,10 @@ const mockUpdateDoc = vi.fn();
 const mockDeleteDoc = vi.fn();
 const mockDoc = vi.fn();
 const mockCollection = vi.fn();
+const mockGetDocs = vi.fn();
+const mockWriteBatch = vi.fn();
+const mockBatchDelete = vi.fn();
+const mockBatchCommit = vi.fn();
 const mockServerTimestamp = vi.fn(() => 'SERVER_TIMESTAMP');
 
 vi.mock('firebase/firestore', () => ({
@@ -13,6 +17,8 @@ vi.mock('firebase/firestore', () => ({
   deleteDoc: (...args: unknown[]) => mockDeleteDoc(...args),
   doc: (...args: unknown[]) => mockDoc(...args),
   collection: (...args: unknown[]) => mockCollection(...args),
+  getDocs: (...args: unknown[]) => mockGetDocs(...args),
+  writeBatch: (...args: unknown[]) => mockWriteBatch(...args),
   serverTimestamp: () => mockServerTimestamp(),
 }));
 
@@ -25,6 +31,10 @@ describe('Firestore helpers', () => {
     vi.clearAllMocks();
     mockDoc.mockReturnValue('mock-doc-ref');
     mockCollection.mockReturnValue('mock-collection-ref');
+    mockWriteBatch.mockImplementation(() => ({
+      delete: (...args: unknown[]) => mockBatchDelete(...args),
+      commit: (...args: unknown[]) => mockBatchCommit(...args),
+    }));
   });
 
   it('addObject should write to firestore with correct path', async () => {
@@ -62,5 +72,21 @@ describe('Firestore helpers', () => {
     await deleteObject('board-1', 'obj-1');
     expect(mockDoc).toHaveBeenCalled();
     expect(mockDeleteDoc).toHaveBeenCalled();
+  });
+
+  it('clearObjects should batch delete all docs', async () => {
+    const { clearObjects } = await import('../firestore');
+
+    mockGetDocs.mockResolvedValue({
+      docs: [{ ref: 'doc-ref-1' }, { ref: 'doc-ref-2' }, { ref: 'doc-ref-3' }],
+    });
+
+    await clearObjects('board-1');
+
+    expect(mockCollection).toHaveBeenCalledWith(expect.anything(), 'boards', 'board-1', 'objects');
+    expect(mockGetDocs).toHaveBeenCalledWith('mock-collection-ref');
+    expect(mockWriteBatch).toHaveBeenCalledWith(expect.anything());
+    expect(mockBatchDelete).toHaveBeenCalledTimes(3);
+    expect(mockBatchCommit).toHaveBeenCalledTimes(1);
   });
 });
