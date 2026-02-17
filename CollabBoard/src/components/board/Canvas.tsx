@@ -79,6 +79,12 @@ export function Canvas({
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // Debug: Log remote cursors
+  useEffect(() => {
+    console.log('👁️ Canvas: Remote cursors updated:', remoteCursors);
+    console.log('👁️ Canvas: Number of remote cursors:', Object.keys(remoteCursors).length);
+  }, [remoteCursors]);
+
   const handleWheel = useCallback(
     (e: Konva.KonvaEventObject<WheelEvent>) => {
       e.evt.preventDefault();
