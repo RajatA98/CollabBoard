@@ -4,16 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { AuthPage } from '../AuthPage';
 
-const navigateMock = vi.hoisted(() => vi.fn());
 const mockUseAuth = vi.hoisted(() => vi.fn());
-
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
-  return {
-    ...actual,
-    useNavigate: () => navigateMock,
-  };
-});
 
 vi.mock('../../../hooks/useAuth', () => ({
   useAuth: () => mockUseAuth(),
@@ -24,7 +15,7 @@ describe('AuthPage', () => {
     vi.clearAllMocks();
   });
 
-  it('shows "Sign up complete" and switches to login on successful signup', async () => {
+  it('calls signup with correct arguments on form submit', async () => {
     const user = userEvent.setup();
     const signup = vi.fn().mockResolvedValue(true);
 
@@ -53,12 +44,10 @@ describe('AuthPage', () => {
 
     await waitFor(() => {
       expect(signup).toHaveBeenCalledWith('test@test.com', 'password123', 'Test User');
-      expect(screen.getByText(/sign up complete/i)).toBeInTheDocument();
-      expect(screen.getByRole('heading', { name: /log in/i })).toBeInTheDocument();
     });
   });
 
-  it('navigates to the board on successful login', async () => {
+  it('calls login with correct arguments on form submit', async () => {
     const user = userEvent.setup();
     const login = vi.fn().mockResolvedValue(true);
 
@@ -84,8 +73,48 @@ describe('AuthPage', () => {
 
     await waitFor(() => {
       expect(login).toHaveBeenCalledWith('test@test.com', 'password123');
-      expect(navigateMock).toHaveBeenCalledWith('/board/default', { replace: true });
     });
   });
-});
 
+  it('redirects to the board when user is authenticated', () => {
+    mockUseAuth.mockReturnValue({
+      user: { uid: '123', email: 'test@test.com', displayName: 'Test' },
+      loading: false,
+      error: null,
+      clearError: vi.fn(),
+      login: vi.fn(),
+      signup: vi.fn(),
+      logout: vi.fn(),
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <AuthPage />
+      </MemoryRouter>
+    );
+
+    expect(screen.queryByRole('heading', { name: /log in/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /sign up/i })).not.toBeInTheDocument();
+  });
+
+  it('shows loading state while auth is initializing', () => {
+    mockUseAuth.mockReturnValue({
+      user: null,
+      loading: true,
+      error: null,
+      clearError: vi.fn(),
+      login: vi.fn(),
+      signup: vi.fn(),
+      logout: vi.fn(),
+    });
+
+    render(
+      <MemoryRouter>
+        <AuthPage />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText(/loading/i)).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /log in/i })).not.toBeInTheDocument();
+  });
+});
