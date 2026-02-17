@@ -4,6 +4,26 @@ import { auth } from '../firebase/config';
 import { signIn, signUp, signOut } from '../firebase/auth';
 import type { AppUser } from '../types';
 
+function getAuthErrorMessage(err: unknown, fallback: string) {
+  const anyErr = err as { code?: string; message?: string };
+  switch (anyErr?.code) {
+    case 'auth/too-many-requests':
+      return 'Too many attempts. Please wait a bit and try again.';
+    case 'auth/email-already-in-use':
+      return 'That email is already in use. Try logging in instead.';
+    case 'auth/weak-password':
+      return 'Password is too weak. Please use a stronger password.';
+    case 'auth/invalid-email':
+      return 'Please enter a valid email address.';
+    case 'auth/invalid-credential':
+    case 'auth/wrong-password':
+    case 'auth/user-not-found':
+      return 'Invalid email or password.';
+    default:
+      return anyErr?.message ?? fallback;
+  }
+}
+
 export function useAuth() {
   const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -33,7 +53,7 @@ export function useAuth() {
       await signIn(email, password);
       return true;
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Login failed';
+      const message = getAuthErrorMessage(err, 'Login failed');
       setError(message);
       return false;
     }
@@ -45,7 +65,7 @@ export function useAuth() {
       await signUp(email, password, displayName);
       return true;
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Signup failed';
+      const message = getAuthErrorMessage(err, 'Signup failed');
       setError(message);
       return false;
     }
@@ -56,7 +76,7 @@ export function useAuth() {
     try {
       await signOut();
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Logout failed';
+      const message = getAuthErrorMessage(err, 'Logout failed');
       setError(message);
     }
   }, []);

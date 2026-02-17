@@ -12,12 +12,14 @@ export function useBoardObjects(boardId: string) {
   const [objects, setObjects] = useState<BoardObject[]>([]);
 
   useEffect(() => {
+    console.log('📡 Setting up Firestore listener for board:', boardId);
     const colRef = collection(db, 'boards', boardId, 'objects');
     const unsubscribe = onSnapshot(colRef, (snapshot) => {
       const docs = snapshot.docs.map((doc) => ({
         ...doc.data(),
         id: doc.id,
       })) as BoardObject[];
+      console.log('🔄 Firestore snapshot received:', { count: docs.length, docs });
       setObjects(docs);
     });
     return unsubscribe;
@@ -25,7 +27,14 @@ export function useBoardObjects(boardId: string) {
 
   const addObject = useCallback(
     async (object: BoardObject) => {
-      await fbAddObject(boardId, object);
+      console.log('💾 useBoardObjects.addObject called with:', { boardId, object });
+      try {
+        await fbAddObject(boardId, object);
+        console.log('✅ fbAddObject completed successfully');
+      } catch (error) {
+        console.error('❌ fbAddObject failed:', error);
+        throw error;
+      }
     },
     [boardId]
   );

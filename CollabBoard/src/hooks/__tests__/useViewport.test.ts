@@ -22,20 +22,20 @@ describe('useViewport', () => {
     expect(result.current.viewport.y).toBe(200);
   });
 
-  it('should clamp zoom between 0.1 and 5', () => {
+  it('should clamp zoom between 0.01 and 100', () => {
     const { result } = renderHook(() => useViewport());
 
     act(() => {
-      result.current.setScale(0.01);
+      result.current.setScale(0.001);
     });
-    expect(result.current.viewport.scaleX).toBe(0.1);
-    expect(result.current.viewport.scaleY).toBe(0.1);
+    expect(result.current.viewport.scaleX).toBe(0.01);
+    expect(result.current.viewport.scaleY).toBe(0.01);
 
     act(() => {
-      result.current.setScale(10);
+      result.current.setScale(200);
     });
-    expect(result.current.viewport.scaleX).toBe(5);
-    expect(result.current.viewport.scaleY).toBe(5);
+    expect(result.current.viewport.scaleX).toBe(100);
+    expect(result.current.viewport.scaleY).toBe(100);
   });
 
   it('should handle zoom toward a point', () => {

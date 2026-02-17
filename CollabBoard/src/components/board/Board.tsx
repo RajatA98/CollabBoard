@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { Toolbar } from './Toolbar';
 import { Canvas } from './Canvas';
@@ -8,9 +8,8 @@ import { useAuth } from '../../hooks/useAuth';
 import { useBoardObjects } from '../../hooks/useBoardObjects';
 import { useCursors } from '../../hooks/useCursors';
 import { usePresence } from '../../hooks/usePresence';
+import { useViewport } from '../../hooks/useViewport';
 import type { BoardObject } from '../../types';
-
-const STICKY_COLORS = ['#FFE066', '#FF6B6B', '#51CF66', '#339AF0', '#CC5DE8', '#FF922B'];
 
 function generateId() {
   return `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -22,8 +21,9 @@ export function Board() {
   const { objects, addObject, updateObject, deleteObject } = useBoardObjects(boardId);
   const { cursors, updateCursor } = useCursors(boardId, user);
   const { onlineUsers } = usePresence(boardId, user);
-  const [activeTool, setActiveTool] = useState('select');
+  const { viewport, setPosition, zoomAtPoint } = useViewport();
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
+  const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
   const [editingObject, setEditingObject] = useState<{
     id: string;
     x: number;
@@ -33,49 +33,80 @@ export function Board() {
     text: string;
   } | null>(null);
 
-  const handleCanvasClick = useCallback(
-    (worldX: number, worldY: number) => {
-      if (!user) return;
+  console.log('📊 Board state:', { objectCount: objects.length, objects, viewport });
 
-      if (activeTool === 'sticky') {
-        const newObject: BoardObject = {
-          id: generateId(),
-          type: 'sticky',
-          x: worldX,
-          y: worldY,
-          width: 150,
-          height: 100,
-          rotation: 0,
-          text: '',
-          color: STICKY_COLORS[Math.floor(Math.random() * STICKY_COLORS.length)],
-          createdBy: user.uid,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-          updatedBy: user.uid,
-        };
-        addObject(newObject);
-        setActiveTool('select');
-      } else if (activeTool === 'rectangle') {
-        const newObject: BoardObject = {
-          id: generateId(),
-          type: 'rectangle',
-          x: worldX,
-          y: worldY,
-          width: 200,
-          height: 150,
-          rotation: 0,
-          color: '#E8E8E8',
-          createdBy: user.uid,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-          updatedBy: user.uid,
-        };
-        addObject(newObject);
-        setActiveTool('select');
-      }
-    },
-    [activeTool, user, addObject]
-  );
+  const handleAddRectangle = useCallback(() => {
+    console.log('🔵 Rectangle button clicked!', { user, hasUser: !!user });
+    
+    if (!user) {
+      console.error('❌ No user found - cannot create rectangle');
+      return;
+    }
+    
+    console.log('✅ User exists, creating rectangle...');
+    
+    // Calculate exact center of visible canvas in world coordinates
+    const canvasWidth = window.innerWidth;
+    const canvasHeight = window.innerHeight - 48; // Subtract toolbar height
+    
+    // Screen space center
+    const screenCenterX = canvasWidth / 2;
+    const screenCenterY = canvasHeight / 2;
+    
+    // Convert screen center to world coordinates
+    const worldCenterX = (screenCenterX - viewport.x) / viewport.scaleX;
+    const worldCenterY = (screenCenterY - viewport.y) / viewport.scaleY;
+    
+    // Rectangle dimensions
+    const rectWidth = 200;
+    const rectHeight = 150;
+    
+    // Position rectangle so its center is at world center
+    const rectX = worldCenterX - (rectWidth / 2);
+    const rectY = worldCenterY - (rectHeight / 2);
+    
+    const id = generateId();
+    const newObject: BoardObject = {
+      id,
+      type: 'rectangle',
+      x: rectX,
+      y: rectY,
+      width: rectWidth,
+      height: rectHeight,
+      rotation: 0,
+      color: '#FF0000', // Bright red for visibility
+      createdBy: user.uid,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      updatedBy: user.uid,
+    };
+    
+    console.log('🟥 Creating rectangle:', {
+      id,
+      viewport,
+      screenCenter: { x: screenCenterX, y: screenCenterY },
+      worldCenter: { x: worldCenterX, y: worldCenterY },
+      rectPosition: { x: rectX, y: rectY },
+      rectSize: { width: rectWidth, height: rectHeight },
+      canvasSize: { width: canvasWidth, height: canvasHeight }
+    });
+    
+    console.log('📤 Calling addObject with:', newObject);
+    
+    addObject(newObject)
+      .then(() => {
+        console.log('✅ Rectangle added to Firestore successfully');
+        setSelectedObjectId(id);
+      })
+      .catch((err) => {
+        console.error('❌ Failed to add rectangle to Firestore:', err);
+      });
+  }, [addObject, user, viewport]);
+
+  const handleCanvasClick = useCallback(() => {
+    // Clicking empty canvas deselects
+    setSelectedObjectId(null);
+  }, []);
 
   const handleObjectUpdate = useCallback(
     (id: string, updates: Partial<BoardObject>) => {
@@ -106,6 +137,7 @@ export function Board() {
 
   const handleMouseMove = useCallback(
     (x: number, y: number) => {
+      lastPointerRef.current = { x, y };
       updateCursor(x, y);
     },
     [updateCursor]
@@ -114,8 +146,7 @@ export function Board() {
   return (
     <div className="board-container">
       <Toolbar
-        activeTool={activeTool}
-        onToolChange={setActiveTool}
+        onAddRectangle={handleAddRectangle}
         onLogout={logout}
       />
       <PresenceBar onlineUsers={onlineUsers} />
@@ -129,6 +160,9 @@ export function Board() {
           onMouseMove={handleMouseMove}
           selectedObjectId={selectedObjectId}
           onSelectObject={setSelectedObjectId}
+          viewport={viewport}
+          setPosition={setPosition}
+          zoomAtPoint={zoomAtPoint}
         />
         {editingObject && (
           <TextEditor

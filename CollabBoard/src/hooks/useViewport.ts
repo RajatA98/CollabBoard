@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 
-const MIN_SCALE = 0.1;
-const MAX_SCALE = 5;
+const MIN_SCALE = 0.01;  // Can zoom out to 1% (see huge area)
+const MAX_SCALE = 100;    // Can zoom in to 10,000% (see tiny details)
 
 interface ViewportState {
   x: number;

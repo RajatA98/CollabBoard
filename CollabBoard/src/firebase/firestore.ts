@@ -9,12 +9,19 @@ import { db } from './config';
 import type { BoardObject } from '../types';
 
 export async function addObject(boardId: string, object: BoardObject) {
+  console.log('🔥 Firebase addObject called:', { boardId, objectId: object.id });
   const ref = doc(db, 'boards', boardId, 'objects', object.id);
-  await setDoc(ref, {
-    ...object,
-    updatedAt: serverTimestamp(),
-    createdAt: serverTimestamp(),
-  });
+  try {
+    await setDoc(ref, {
+      ...object,
+      updatedAt: serverTimestamp(),
+      createdAt: serverTimestamp(),
+    });
+    console.log('✅ Firebase setDoc completed for:', object.id);
+  } catch (error) {
+    console.error('❌ Firebase setDoc failed:', error);
+    throw error;
+  }
 }
 
 export async function updateObject(boardId: string, objectId: string, updates: Partial<BoardObject>) {
