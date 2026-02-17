@@ -35,3 +35,15 @@ export interface AppUser {
   email: string;
   displayName: string;
 }
+
+export interface BoardMeta {
+  id: string;
+  name: string;
+  creatorId: string;
+  creatorName: string;
+  members: string[];
+  memberNames: Record<string, string>;
+  createdAt: number;
+  updatedAt: number;
+  visibility: 'open';
+}

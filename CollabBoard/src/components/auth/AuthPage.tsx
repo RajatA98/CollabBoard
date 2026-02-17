@@ -15,7 +15,7 @@ export function AuthPage() {
   }
 
   if (user) {
-    return <Navigate to="/board/default" replace />;
+    return <Navigate to="/dashboard" replace />;
   }
 
   const switchToSignup = () => {
@@ -33,7 +33,7 @@ export function AuthPage() {
   const handleLogin = async (email: string, password: string) => {
     const ok = await login(email, password);
     if (ok) {
-      navigate('/board/default', { replace: true });
+      navigate('/dashboard', { replace: true });
     }
     return ok;
   };
@@ -41,7 +41,7 @@ export function AuthPage() {
   const handleSignup = async (email: string, password: string, displayName: string) => {
     const ok = await signup(email, password, displayName);
     if (ok) {
-      navigate('/board/default', { replace: true });
+      navigate('/dashboard', { replace: true });
     }
     return ok;
   };

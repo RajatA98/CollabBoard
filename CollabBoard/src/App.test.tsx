@@ -13,6 +13,10 @@ vi.mock('./components/auth/AuthPage', () => ({
   AuthPage: () => <div data-testid="auth-page">Auth Page</div>,
 }));
 
+vi.mock('./components/dashboard/Dashboard', () => ({
+  Dashboard: () => <div data-testid="dashboard-page">Dashboard Page</div>,
+}));
+
 vi.mock('./components/board/Board', () => ({
   Board: () => <div data-testid="board-page">Board Page</div>,
 }));
@@ -59,5 +63,24 @@ describe('App Routing', () => {
     });
     renderWithRouter('/board/test');
     expect(screen.getByTestId('board-page')).toBeInTheDocument();
+  });
+
+  it('should show dashboard when authenticated and navigating to /dashboard', () => {
+    mockUseAuth.mockReturnValue({
+      user: { uid: '123', email: 'test@test.com', displayName: 'Test' },
+      loading: false,
+      error: null,
+      login: vi.fn(),
+      signup: vi.fn(),
+      logout: vi.fn(),
+    });
+    renderWithRouter('/dashboard');
+    expect(screen.getByTestId('dashboard-page')).toBeInTheDocument();
+  });
+
+  it('should redirect to auth when accessing dashboard unauthenticated', () => {
+    mockUseAuth.mockReturnValue({ user: null, loading: false, error: null, login: vi.fn(), signup: vi.fn(), logout: vi.fn() });
+    renderWithRouter('/dashboard');
+    expect(screen.getByTestId('auth-page')).toBeInTheDocument();
   });
 });
