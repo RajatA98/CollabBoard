@@ -37,6 +37,28 @@ export function screenToWorld(
 }
 
 /**
+ * Axis-aligned bounding box
+ */
+export interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Test if two axis-aligned rectangles intersect
+ */
+export function rectsIntersect(r1: Rect, r2: Rect): boolean {
+  return !(
+    r1.x + r1.width < r2.x ||
+    r2.x + r2.width < r1.x ||
+    r1.y + r1.height < r2.y ||
+    r2.y + r2.height < r1.y
+  );
+}
+
+/**
  * Convert world coordinates to screen coordinates
  * Takes into account viewport position and scale
  * 

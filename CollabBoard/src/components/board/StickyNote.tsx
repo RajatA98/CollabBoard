@@ -5,13 +5,15 @@ import type { KonvaEventObject } from 'konva/lib/Node';
 interface StickyNoteProps {
   object: BoardObject;
   isSelected: boolean;
-  onSelect: () => void;
+  onSelect: (additive: boolean) => void;
   onUpdate: (updates: Partial<BoardObject>) => void;
   onDoubleClick?: () => void;
   onRightClick?: (screenX: number, screenY: number) => void;
+  onDragStart?: () => void;
+  onDragMove?: (x: number, y: number) => void;
 }
 
-export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleClick, onRightClick }: StickyNoteProps) {
+export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleClick, onRightClick, onDragStart, onDragMove }: StickyNoteProps) {
   const handleDoubleClick = () => {
     console.log('🖱️ Sticky note double-clicked!', object.id);
     if (onDoubleClick) {
@@ -28,7 +30,7 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
       const pointer = stage?.getPointerPosition();
       if (pointer) onRightClick?.(pointer.x, pointer.y);
     } else {
-      onSelect();
+      onSelect(e.evt?.shiftKey ?? false);
     }
   };
 
@@ -47,10 +49,12 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
       rotation={object.rotation || 0}
       draggable
       onClick={handleClick}
-      onTap={onSelect}
+      onTap={() => onSelect(false)}
       onDblClick={handleDoubleClick}
       onDblTap={handleDoubleClick}
       onContextMenu={handleContextMenu}
+      onDragStart={() => onDragStart?.()}
+      onDragMove={(e) => onDragMove?.(e.target.x(), e.target.y())}
       onDragEnd={(e) => {
         onUpdate({ x: e.target.x(), y: e.target.y() });
       }}

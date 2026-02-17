@@ -22,35 +22,26 @@ describe('Canvas', () => {
   const mockSetPosition = vi.fn();
   const mockZoomAtPoint = vi.fn();
 
+  const baseProps = {
+    objects: [],
+    onObjectUpdate: vi.fn(),
+    onCanvasClick: vi.fn(),
+    onObjectDoubleClick: vi.fn(),
+    selectedObjectIds: [] as string[],
+    onSelectObject: vi.fn(),
+    onClearSelection: vi.fn(),
+    viewport: mockViewport,
+    setPosition: mockSetPosition,
+    zoomAtPoint: mockZoomAtPoint,
+  };
+
   it('should render the stage', () => {
-    render(
-      <Canvas
-        objects={[]}
-        onObjectUpdate={vi.fn()}
-        onObjectDelete={vi.fn()}
-        onCanvasClick={vi.fn()}
-        onObjectDoubleClick={vi.fn()}
-        viewport={mockViewport}
-        setPosition={mockSetPosition}
-        zoomAtPoint={mockZoomAtPoint}
-      />
-    );
+    render(<Canvas {...baseProps} />);
     expect(screen.getByTestId('konva-stage')).toBeInTheDocument();
   });
 
   it('should render layers', () => {
-    render(
-      <Canvas
-        objects={[]}
-        onObjectUpdate={vi.fn()}
-        onObjectDelete={vi.fn()}
-        onCanvasClick={vi.fn()}
-        onObjectDoubleClick={vi.fn()}
-        viewport={mockViewport}
-        setPosition={mockSetPosition}
-        zoomAtPoint={mockZoomAtPoint}
-      />
-    );
+    render(<Canvas {...baseProps} />);
     const layers = screen.getAllByTestId('konva-layer');
     expect(layers.length).toBeGreaterThanOrEqual(1);
   });
