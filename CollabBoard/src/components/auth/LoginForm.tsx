@@ -10,10 +10,17 @@ interface LoginFormProps {
 export function LoginForm({ onLogin, onSwitchToSignup, error, message }: LoginFormProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    onLogin(email, password);
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await onLogin(email, password);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -28,6 +35,7 @@ export function LoginForm({ onLogin, onSwitchToSignup, error, message }: LoginFo
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
+          disabled={submitting}
           required
         />
       </div>
@@ -38,10 +46,13 @@ export function LoginForm({ onLogin, onSwitchToSignup, error, message }: LoginFo
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          disabled={submitting}
           required
         />
       </div>
-      <button type="submit">Log In</button>
+      <button type="submit" disabled={submitting}>
+        {submitting ? 'Logging In…' : 'Log In'}
+      </button>
       <p className="auth-switch">
         Don't have an account?{' '}
         <span onClick={onSwitchToSignup} className="auth-link">

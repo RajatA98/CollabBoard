@@ -10,10 +10,17 @@ export function SignupForm({ onSignup, onSwitchToLogin, error }: SignupFormProps
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    onSignup(email, password, name);
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await onSignup(email, password, name);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -27,6 +34,7 @@ export function SignupForm({ onSignup, onSwitchToLogin, error }: SignupFormProps
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
+          disabled={submitting}
           required
         />
       </div>
@@ -37,6 +45,7 @@ export function SignupForm({ onSignup, onSwitchToLogin, error }: SignupFormProps
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
+          disabled={submitting}
           required
         />
       </div>
@@ -47,10 +56,13 @@ export function SignupForm({ onSignup, onSwitchToLogin, error }: SignupFormProps
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          disabled={submitting}
           required
         />
       </div>
-      <button type="submit">Sign Up</button>
+      <button type="submit" disabled={submitting}>
+        {submitting ? 'Signing Up…' : 'Sign Up'}
+      </button>
       <p className="auth-switch">
         Already have an account?{' '}
         <span onClick={onSwitchToLogin} className="auth-link">

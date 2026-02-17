@@ -18,13 +18,37 @@ vi.mock('konva', () => ({
 }));
 
 describe('Canvas', () => {
+  const mockViewport = { x: 0, y: 0, scaleX: 1, scaleY: 1 };
+  const mockSetPosition = vi.fn();
+  const mockZoomAtPoint = vi.fn();
+
   it('should render the stage', () => {
-    render(<Canvas objects={[]} onObjectUpdate={vi.fn()} onObjectDelete={vi.fn()} onCanvasClick={vi.fn()} />);
+    render(
+      <Canvas
+        objects={[]}
+        onObjectUpdate={vi.fn()}
+        onObjectDelete={vi.fn()}
+        onCanvasClick={vi.fn()}
+        viewport={mockViewport}
+        setPosition={mockSetPosition}
+        zoomAtPoint={mockZoomAtPoint}
+      />
+    );
     expect(screen.getByTestId('konva-stage')).toBeInTheDocument();
   });
 
   it('should render layers', () => {
-    render(<Canvas objects={[]} onObjectUpdate={vi.fn()} onObjectDelete={vi.fn()} onCanvasClick={vi.fn()} />);
+    render(
+      <Canvas
+        objects={[]}
+        onObjectUpdate={vi.fn()}
+        onObjectDelete={vi.fn()}
+        onCanvasClick={vi.fn()}
+        viewport={mockViewport}
+        setPosition={mockSetPosition}
+        zoomAtPoint={mockZoomAtPoint}
+      />
+    );
     const layers = screen.getAllByTestId('konva-layer');
     expect(layers.length).toBeGreaterThanOrEqual(1);
   });

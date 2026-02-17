@@ -1,7 +1,6 @@
 import { useRef, useCallback, useEffect, useState } from 'react';
 import { Stage, Layer } from 'react-konva';
 import type Konva from 'konva';
-import { useViewport } from '../../hooks/useViewport';
 import { GridBackground } from './GridBackground';
 import { StickyNote } from './StickyNote';
 import { Rectangle } from './Rectangle';
@@ -12,11 +11,14 @@ interface CanvasProps {
   objects: BoardObject[];
   onObjectUpdate: (id: string, updates: Partial<BoardObject>) => void;
   onObjectDelete: (id: string) => void;
-  onCanvasClick: (x: number, y: number) => void;
+  onCanvasClick: () => void;
   remoteCursors?: Record<string, CursorData>;
   onMouseMove?: (x: number, y: number) => void;
   selectedObjectId?: string | null;
   onSelectObject?: (id: string | null) => void;
+  viewport: { x: number; y: number; scaleX: number; scaleY: number };
+  setPosition: (x: number, y: number) => void;
+  zoomAtPoint: (newScale: number, pointerX: number, pointerY: number) => void;
 }
 
 const ZOOM_SPEED = 1.05;
@@ -30,9 +32,11 @@ export function Canvas({
   onMouseMove,
   selectedObjectId,
   onSelectObject,
+  viewport,
+  setPosition,
+  zoomAtPoint,
 }: CanvasProps) {
   const stageRef = useRef<Konva.Stage>(null);
-  const { viewport, setPosition, zoomAtPoint } = useViewport();
   const [stageSize, setStageSize] = useState({ width: window.innerWidth, height: window.innerHeight - 48 });
 
   useEffect(() => {
@@ -73,16 +77,10 @@ export function Canvas({
     (e: Konva.KonvaEventObject<MouseEvent>) => {
       if (e.target === stageRef.current) {
         onSelectObject?.(null);
-        const stage = stageRef.current;
-        if (!stage) return;
-        const pointer = stage.getPointerPosition();
-        if (!pointer) return;
-        const worldX = (pointer.x - viewport.x) / viewport.scaleX;
-        const worldY = (pointer.y - viewport.y) / viewport.scaleY;
-        onCanvasClick(worldX, worldY);
+        onCanvasClick();
       }
     },
-    [onCanvasClick, onSelectObject, viewport]
+    [onCanvasClick, onSelectObject]
   );
 
   const handleMouseMove = useCallback(
@@ -133,8 +131,9 @@ export function Canvas({
         <GridBackground viewport={viewport} stageSize={stageSize} />
       </Layer>
       <Layer>
-        {objects.map((obj) =>
-          obj.type === 'sticky' ? (
+        {objects.map((obj) => {
+          console.log('🎨 Rendering object:', obj);
+          return obj.type === 'sticky' ? (
             <StickyNote
               key={obj.id}
               object={obj}
@@ -150,8 +149,8 @@ export function Canvas({
               onSelect={() => onSelectObject?.(obj.id)}
               onUpdate={(updates) => onObjectUpdate(obj.id, updates)}
             />
-          )
-        )}
+          );
+        })}
       </Layer>
       <Layer>
         {Object.entries(remoteCursors).map(([userId, cursor]) => (
