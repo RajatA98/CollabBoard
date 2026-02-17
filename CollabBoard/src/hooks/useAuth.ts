@@ -43,9 +43,6 @@ export function useAuth() {
     setError(null);
     try {
       await signUp(email, password, displayName);
-      // Firebase signs the user in immediately after creating the account.
-      // For this app's UX, we force a sign-out so the user goes back to Sign In.
-      await signOut();
       return true;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Signup failed';

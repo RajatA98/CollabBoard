@@ -70,9 +70,8 @@ describe('useAuth', () => {
 
   it('should handle signup', async () => {
     const mockUser = { uid: '123', email: 'test@test.com', displayName: 'Test' };
-    const { signUp, signOut } = await import('../../firebase/auth');
+    const { signUp } = await import('../../firebase/auth');
     vi.mocked(signUp).mockResolvedValue(mockUser as ReturnType<typeof signUp> extends Promise<infer T> ? T : never);
-    vi.mocked(signOut).mockResolvedValue(undefined);
 
     const { result } = renderHook(() => useAuth());
     await waitFor(() => expect(result.current.loading).toBe(false));
@@ -82,7 +81,6 @@ describe('useAuth', () => {
     });
 
     expect(signUp).toHaveBeenCalledWith('test@test.com', 'password123', 'Test User');
-    expect(signOut).toHaveBeenCalled();
   });
 
   it('should handle logout', async () => {
