@@ -33,17 +33,20 @@ export function Board() {
     text: string;
   } | null>(null);
 
-  console.log('📊 Board state:', { objectCount: objects.length, objects, viewport });
+  console.log('📊 Board state:', { 
+    objectCount: objects.length, 
+    objects, 
+    viewport,
+    editingObject: editingObject ? editingObject.id : null 
+  });
 
-  const handleAddRectangle = useCallback(() => {
-    console.log('🔵 Rectangle button clicked!', { user, hasUser: !!user });
-    
+  const createObjectAtCenter = useCallback((type: 'rectangle' | 'sticky') => {
     if (!user) {
-      console.error('❌ No user found - cannot create rectangle');
+      console.error('❌ No user found - cannot create object');
       return;
     }
     
-    console.log('✅ User exists, creating rectangle...');
+    console.log(`✅ User exists, creating ${type}...`);
     
     // Calculate exact center of visible canvas in world coordinates
     const canvasWidth = window.innerWidth;
@@ -57,51 +60,67 @@ export function Board() {
     const worldCenterX = (screenCenterX - viewport.x) / viewport.scaleX;
     const worldCenterY = (screenCenterY - viewport.y) / viewport.scaleY;
     
-    // Rectangle dimensions
-    const rectWidth = 200;
-    const rectHeight = 150;
-    
-    // Position rectangle so its center is at world center
-    const rectX = worldCenterX - (rectWidth / 2);
-    const rectY = worldCenterY - (rectHeight / 2);
-    
     const id = generateId();
-    const newObject: BoardObject = {
-      id,
-      type: 'rectangle',
-      x: rectX,
-      y: rectY,
-      width: rectWidth,
-      height: rectHeight,
-      rotation: 0,
-      color: '#FF0000', // Bright red for visibility
-      createdBy: user.uid,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      updatedBy: user.uid,
-    };
+    let newObject: BoardObject;
     
-    console.log('🟥 Creating rectangle:', {
-      id,
-      viewport,
-      screenCenter: { x: screenCenterX, y: screenCenterY },
-      worldCenter: { x: worldCenterX, y: worldCenterY },
-      rectPosition: { x: rectX, y: rectY },
-      rectSize: { width: rectWidth, height: rectHeight },
-      canvasSize: { width: canvasWidth, height: canvasHeight }
-    });
-    
-    console.log('📤 Calling addObject with:', newObject);
+    if (type === 'sticky') {
+      const noteWidth = 200;
+      const noteHeight = 200;
+      newObject = {
+        id,
+        type: 'sticky',
+        x: worldCenterX - (noteWidth / 2),
+        y: worldCenterY - (noteHeight / 2),
+        width: noteWidth,
+        height: noteHeight,
+        rotation: 0,
+        text: '',
+        color: '#FFD54F', // Classic sticky note yellow
+        createdBy: user.uid,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        updatedBy: user.uid,
+      };
+      console.log('📝 Creating sticky note:', newObject);
+    } else {
+      const rectWidth = 200;
+      const rectHeight = 150;
+      newObject = {
+        id,
+        type: 'rectangle',
+        x: worldCenterX - (rectWidth / 2),
+        y: worldCenterY - (rectHeight / 2),
+        width: rectWidth,
+        height: rectHeight,
+        rotation: 0,
+        color: '#90CAF9', // Light blue
+        createdBy: user.uid,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        updatedBy: user.uid,
+      };
+      console.log('🟦 Creating rectangle:', newObject);
+    }
     
     addObject(newObject)
       .then(() => {
-        console.log('✅ Rectangle added to Firestore successfully');
+        console.log(`✅ ${type} added to Firestore successfully`);
         setSelectedObjectId(id);
       })
       .catch((err) => {
-        console.error('❌ Failed to add rectangle to Firestore:', err);
+        console.error(`❌ Failed to add ${type} to Firestore:`, err);
       });
   }, [addObject, user, viewport]);
+
+  const handleAddRectangle = useCallback(() => {
+    console.log('🔵 Rectangle button clicked!');
+    createObjectAtCenter('rectangle');
+  }, [createObjectAtCenter]);
+
+  const handleAddStickyNote = useCallback(() => {
+    console.log('🟨 Sticky Note button clicked!');
+    createObjectAtCenter('sticky');
+  }, [createObjectAtCenter]);
 
   const handleCanvasClick = useCallback(() => {
     // Clicking empty canvas deselects
@@ -127,9 +146,13 @@ export function Board() {
 
   const handleTextSubmit = useCallback(
     (text: string) => {
+      console.log('💾 handleTextSubmit called', { text, editingObject });
       if (editingObject) {
+        console.log('✅ Saving text to object:', editingObject.id);
         updateObject(editingObject.id, { text });
         setEditingObject(null);
+      } else {
+        console.error('❌ No editing object found');
       }
     },
     [editingObject, updateObject]
@@ -143,10 +166,45 @@ export function Board() {
     [updateCursor]
   );
 
+  const handleObjectDoubleClick = useCallback(
+    (obj: BoardObject) => {
+      console.log('📝 handleObjectDoubleClick called', { objId: obj.id, type: obj.type });
+      
+      if (obj.type === 'sticky') {
+        console.log('✅ Opening text editor for sticky note', obj);
+        
+        // Convert world coordinates to screen coordinates for the text editor
+        const screenX = obj.x * viewport.scaleX + viewport.x;
+        const screenY = obj.y * viewport.scaleY + viewport.y;
+        const screenWidth = obj.width * viewport.scaleX;
+        const screenHeight = obj.height * viewport.scaleY;
+        
+        console.log('📍 Editor position:', {
+          world: { x: obj.x, y: obj.y, w: obj.width, h: obj.height },
+          screen: { x: screenX, y: screenY, w: screenWidth, h: screenHeight },
+          viewport
+        });
+        
+        setEditingObject({
+          id: obj.id,
+          x: screenX,
+          y: screenY,
+          width: screenWidth,
+          height: screenHeight,
+          text: obj.text || '',
+        });
+      } else {
+        console.log('ℹ️ Not a sticky note, skipping editor');
+      }
+    },
+    [viewport]
+  );
+
   return (
     <div className="board-container">
       <Toolbar
         onAddRectangle={handleAddRectangle}
+        onAddStickyNote={handleAddStickyNote}
         onLogout={logout}
       />
       <PresenceBar onlineUsers={onlineUsers} />
@@ -156,6 +214,7 @@ export function Board() {
           onObjectUpdate={handleObjectUpdate}
           onObjectDelete={handleObjectDelete}
           onCanvasClick={handleCanvasClick}
+          onObjectDoubleClick={handleObjectDoubleClick}
           remoteCursors={cursors}
           onMouseMove={handleMouseMove}
           selectedObjectId={selectedObjectId}

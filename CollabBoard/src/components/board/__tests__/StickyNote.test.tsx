@@ -37,8 +37,8 @@ describe('StickyNote', () => {
 
   it('should render with correct color', () => {
     render(<StickyNote object={mockObject} isSelected={false} onSelect={vi.fn()} onUpdate={vi.fn()} />);
-    const rect = screen.getByTestId('sticky-rect');
-    expect(rect).toHaveAttribute('data-fill', '#FFE066');
+    const rects = screen.getAllByTestId('sticky-rect');
+    expect(rects[0]).toHaveAttribute('data-fill', '#FFE066');
   });
 
   it('should call onSelect when clicked', async () => {
@@ -50,8 +50,8 @@ describe('StickyNote', () => {
 
   it('should render with correct dimensions', () => {
     render(<StickyNote object={mockObject} isSelected={false} onSelect={vi.fn()} onUpdate={vi.fn()} />);
-    const rect = screen.getByTestId('sticky-rect');
-    expect(rect).toHaveAttribute('data-width', '150');
-    expect(rect).toHaveAttribute('data-height', '100');
+    const rects = screen.getAllByTestId('sticky-rect');
+    expect(rects[0]).toHaveAttribute('data-width', '150');
+    expect(rects[0]).toHaveAttribute('data-height', '100');
   });
 });
