@@ -11,12 +11,12 @@ export function PresenceBar({ onlineUsers }: PresenceBarProps) {
       <div className="presence-avatars">
         {onlineUsers.map((user, i) => (
           <div
-            key={`${user.email}-${i}`}
+            key={`${user.email}-${user.name}-${i}`}
             className="presence-avatar"
             style={{ backgroundColor: user.color }}
-            title={user.name}
+            title={user.name || user.email}
           >
-            <span className="avatar-initial">{user.name.charAt(0).toUpperCase()}</span>
+            <span className="avatar-initial">{(user.name || user.email || '?').charAt(0).toUpperCase()}</span>
             <span className="avatar-name">{user.name}</span>
           </div>
         ))}
