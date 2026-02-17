@@ -35,6 +35,7 @@ export function AuthPage() {
     if (ok) {
       navigate('/board/default', { replace: true });
     }
+    return ok;
   };
 
   const handleSignup = async (email: string, password: string, displayName: string) => {
@@ -42,6 +43,7 @@ export function AuthPage() {
     if (ok) {
       navigate('/board/default', { replace: true });
     }
+    return ok;
   };
 
   return (
