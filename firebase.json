@@ -24,6 +24,7 @@
     }
   ],
   "hosting": {
+    "site": "collabboard-fe299",
     "public": "CollabBoard/dist",
     "ignore": [
       "firebase.json",

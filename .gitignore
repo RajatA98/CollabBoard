@@ -64,6 +64,19 @@ node_modules/
 
 # dotenv environment variables file
 .env
+.env.local
+.env.*.local
+
+# Build output
+dist/
+dist-ssr/
+*.local
+
+# Editor / OS
+.DS_Store
+.idea
+.vscode/*
+!.vscode/extensions.json
 
 # dataconnect generated files
 .dataconnect
