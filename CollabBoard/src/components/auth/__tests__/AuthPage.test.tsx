@@ -4,7 +4,16 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { AuthPage } from '../AuthPage';
 
+const navigateMock = vi.hoisted(() => vi.fn());
 const mockUseAuth = vi.hoisted(() => vi.fn());
+
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
+  return {
+    ...actual,
+    useNavigate: () => navigateMock,
+  };
+});
 
 vi.mock('../../../hooks/useAuth', () => ({
   useAuth: () => mockUseAuth(),
@@ -15,7 +24,7 @@ describe('AuthPage', () => {
     vi.clearAllMocks();
   });
 
-  it('calls signup with correct arguments on form submit', async () => {
+  it('navigates to the board on successful signup', async () => {
     const user = userEvent.setup();
     const signup = vi.fn().mockResolvedValue(true);
 
@@ -44,10 +53,11 @@ describe('AuthPage', () => {
 
     await waitFor(() => {
       expect(signup).toHaveBeenCalledWith('test@test.com', 'password123', 'Test User');
+      expect(navigateMock).toHaveBeenCalledWith('/board/default', { replace: true });
     });
   });
 
-  it('calls login with correct arguments on form submit', async () => {
+  it('navigates to the board on successful login', async () => {
     const user = userEvent.setup();
     const login = vi.fn().mockResolvedValue(true);
 
@@ -73,6 +83,7 @@ describe('AuthPage', () => {
 
     await waitFor(() => {
       expect(login).toHaveBeenCalledWith('test@test.com', 'password123');
+      expect(navigateMock).toHaveBeenCalledWith('/board/default', { replace: true });
     });
   });
 
