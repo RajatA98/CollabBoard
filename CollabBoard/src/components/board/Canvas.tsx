@@ -12,6 +12,7 @@ interface CanvasProps {
   onObjectUpdate: (id: string, updates: Partial<BoardObject>) => void;
   onObjectDelete: (id: string) => void;
   onCanvasClick: () => void;
+  onObjectDoubleClick?: (obj: BoardObject) => void;
   remoteCursors?: Record<string, CursorData>;
   onMouseMove?: (x: number, y: number) => void;
   selectedObjectId?: string | null;
@@ -28,6 +29,7 @@ export function Canvas({
   onObjectUpdate,
   onObjectDelete,
   onCanvasClick,
+  onObjectDoubleClick,
   remoteCursors = {},
   onMouseMove,
   selectedObjectId,
@@ -140,6 +142,7 @@ export function Canvas({
               isSelected={selectedObjectId === obj.id}
               onSelect={() => onSelectObject?.(obj.id)}
               onUpdate={(updates) => onObjectUpdate(obj.id, updates)}
+              onDoubleClick={() => onObjectDoubleClick?.(obj)}
             />
           ) : (
             <Rectangle

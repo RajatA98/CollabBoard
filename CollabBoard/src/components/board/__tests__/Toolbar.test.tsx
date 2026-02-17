@@ -9,9 +9,19 @@ describe('Toolbar', () => {
     expect(screen.getByTestId('toolbar')).toBeInTheDocument();
   });
 
-  it('should render rectangle button', () => {
-    render(<Toolbar onAddRectangle={vi.fn()} />);
+  it('should render sticky note and rectangle buttons', () => {
+    render(<Toolbar onAddStickyNote={vi.fn()} onAddRectangle={vi.fn()} />);
+    expect(screen.getByRole('button', { name: /sticky note/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /rectangle/i })).toBeInTheDocument();
+  });
+
+  it('should call onAddStickyNote when sticky note button is clicked', async () => {
+    const user = userEvent.setup();
+    const mockAddStickyNote = vi.fn();
+    render(<Toolbar onAddStickyNote={mockAddStickyNote} />);
+
+    await user.click(screen.getByRole('button', { name: /sticky note/i }));
+    expect(mockAddStickyNote).toHaveBeenCalled();
   });
 
   it('should call onAddRectangle when rectangle button is clicked', async () => {

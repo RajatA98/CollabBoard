@@ -44,19 +44,22 @@ export function TextEditor({ x, y, width, height, text, onSubmit, onCancel }: Te
         width,
         height,
         padding: '8px',
-        fontSize: '14px',
-        fontFamily: 'sans-serif',
-        border: '2px solid #0066ff',
-        borderRadius: '4px',
+        fontSize: '16px',
+        fontFamily: "'Segoe Print', 'Comic Sans MS', cursive",
+        border: '3px solid #FFA726',
+        borderRadius: '2px',
         resize: 'none',
         outline: 'none',
-        background: 'transparent',
+        background: '#FFD54F',
+        color: '#333',
         zIndex: 1000,
+        boxShadow: '2px 4px 8px rgba(0,0,0,0.3)',
       }}
       value={value}
       onChange={(e) => setValue(e.target.value)}
       onBlur={handleBlur}
       onKeyDown={handleKeyDown}
+      placeholder="Type your note..."
     />
   );
 }

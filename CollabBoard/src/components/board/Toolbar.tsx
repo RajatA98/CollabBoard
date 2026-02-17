@@ -2,21 +2,25 @@ import { useState } from 'react';
 
 interface ToolbarProps {
   onAddRectangle?: () => void;
+  onAddStickyNote?: () => void;
   onLogout?: () => void;
 }
 
-export function Toolbar({ onAddRectangle, onLogout }: ToolbarProps) {
-  const [isClicked, setIsClicked] = useState(false);
+export function Toolbar({ onAddRectangle, onAddStickyNote, onLogout }: ToolbarProps) {
+  const [clickedButton, setClickedButton] = useState<string | null>(null);
 
   const handleRectangleClick = () => {
-    console.log('🖱️ Rectangle button clicked in Toolbar', { onAddRectangle: !!onAddRectangle });
-    setIsClicked(true);
-    if (onAddRectangle) {
-      onAddRectangle();
-    } else {
-      console.error('❌ onAddRectangle is not defined!');
-    }
-    setTimeout(() => setIsClicked(false), 200);
+    console.log('🖱️ Rectangle button clicked in Toolbar');
+    setClickedButton('rectangle');
+    onAddRectangle?.();
+    setTimeout(() => setClickedButton(null), 200);
+  };
+
+  const handleStickyNoteClick = () => {
+    console.log('🖱️ Sticky Note button clicked in Toolbar');
+    setClickedButton('sticky');
+    onAddStickyNote?.();
+    setTimeout(() => setClickedButton(null), 200);
   };
 
   return (
@@ -24,7 +28,14 @@ export function Toolbar({ onAddRectangle, onLogout }: ToolbarProps) {
       <div className="toolbar-brand">CollabBoard</div>
       <div className="toolbar-tools">
         <button
-          className={`tool-btn ${isClicked ? 'active' : ''}`}
+          className={`tool-btn ${clickedButton === 'sticky' ? 'active' : ''}`}
+          onClick={handleStickyNoteClick}
+          aria-label="Sticky Note"
+        >
+          Sticky Note
+        </button>
+        <button
+          className={`tool-btn ${clickedButton === 'rectangle' ? 'active' : ''}`}
           onClick={handleRectangleClick}
           aria-label="Rectangle"
         >
