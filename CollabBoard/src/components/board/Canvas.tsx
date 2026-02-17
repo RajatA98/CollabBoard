@@ -15,6 +15,7 @@ interface CanvasProps {
   onObjectDoubleClick?: (obj: BoardObject) => void;
   remoteCursors?: Record<string, CursorData>;
   onMouseMove?: (x: number, y: number) => void;
+  onMouseLeave?: () => void;
   selectedObjectId?: string | null;
   onSelectObject?: (id: string | null) => void;
   viewport: { x: number; y: number; scaleX: number; scaleY: number };
@@ -32,6 +33,7 @@ export function Canvas({
   onObjectDoubleClick,
   remoteCursors = {},
   onMouseMove,
+  onMouseLeave,
   selectedObjectId,
   onSelectObject,
   viewport,
@@ -128,6 +130,7 @@ export function Canvas({
       onDragEnd={handleDragEnd}
       onClick={handleStageClick}
       onMouseMove={handleMouseMove}
+      onMouseLeave={onMouseLeave}
     >
       <Layer>
         <GridBackground viewport={viewport} stageSize={stageSize} />
@@ -157,7 +160,7 @@ export function Canvas({
       </Layer>
       <Layer>
         {Object.entries(remoteCursors).map(([userId, cursor]) => (
-          <RemoteCursor key={userId} cursor={cursor} />
+          <RemoteCursor key={userId} cursor={cursor} scale={viewport.scaleX} />
         ))}
       </Layer>
     </Stage>

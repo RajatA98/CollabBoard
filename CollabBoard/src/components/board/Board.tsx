@@ -19,7 +19,7 @@ export function Board() {
   const { boardId = 'default' } = useParams();
   const { user, logout } = useAuth();
   const { objects, addObject, updateObject, deleteObject } = useBoardObjects(boardId);
-  const { cursors, updateCursor } = useCursors(boardId, user);
+  const { cursors, updateCursor, hideCursor } = useCursors(boardId, user);
   const { onlineUsers } = usePresence(boardId, user);
   const { viewport, setPosition, zoomAtPoint } = useViewport();
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
@@ -217,6 +217,7 @@ export function Board() {
           onObjectDoubleClick={handleObjectDoubleClick}
           remoteCursors={cursors}
           onMouseMove={handleMouseMove}
+          onMouseLeave={hideCursor}
           selectedObjectId={selectedObjectId}
           onSelectObject={setSelectedObjectId}
           viewport={viewport}
