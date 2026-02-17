@@ -116,19 +116,19 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
             listening={false}
           />
           <Rect
-            x={object.width - 80}
+            x={object.width - 90}
             y={-20}
-            width={80}
+            width={90}
             height={18}
             fill={remoteEditing.userColor}
             cornerRadius={4}
             listening={false}
           />
           <Text
-            text={`${remoteEditing.userName} typing`}
-            x={object.width - 78}
+            text={`${remoteEditing.userName} typing...`}
+            x={object.width - 88}
             y={-18}
-            width={76}
+            width={86}
             height={14}
             fontSize={10}
             fontFamily="sans-serif"

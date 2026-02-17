@@ -78,6 +78,21 @@ export function Canvas({
     y: number;
     rotation: number;
   } | null>(null);
+  const liveTransformRef = useRef<typeof liveTransform>(null);
+  const isTransformingRef = useRef(false);
+  const [dimensionLabelTick, setDimensionLabelTick] = useState(0);
+  const dimensionLabelRafRef = useRef<number | null>(null);
+
+  // One rAF-driven re-render per frame during transform so DimensionLabel reads liveTransformRef without delay
+  const startDimensionLabelRafLoop = useCallback(() => {
+    const loop = () => {
+      setDimensionLabelTick((t) => t + 1);
+      if (isTransformingRef.current) {
+        dimensionLabelRafRef.current = requestAnimationFrame(loop);
+      }
+    };
+    dimensionLabelRafRef.current = requestAnimationFrame(loop);
+  }, []);
 
   // Build lookup: objectId -> LiveTransformData for remote users' live transforms
   const remoteTransformByObjectId = useMemo(() => {
@@ -297,11 +312,15 @@ export function Canvas({
           objects
             .filter((obj) => obj.id === selectedObjectId)
             .map((obj) => {
-              // During resize/rotate, pass live x/y/rotation so React doesn't overwrite the node with stale object and cause border/position lag
+              const remoteXform = remoteTransformByObjectId[obj.id];
+              const remoteEdit = remoteEditingByObjectId[obj.id];
+              // During resize/rotate, pass live x/y/rotation; else use remote transform if another user is manipulating
               const displayObject =
                 liveTransform != null
-                  ? { ...obj, x: liveTransform.x, y: liveTransform.y, rotation: liveTransform.rotation }
-                  : obj;
+                  ? { ...obj, x: liveTransform.x, y: liveTransform.y, rotation: liveTransform.rotation, width: liveTransform.width, height: liveTransform.height }
+                  : remoteXform != null
+                    ? { ...obj, x: remoteXform.x, y: remoteXform.y, width: remoteXform.width, height: remoteXform.height, rotation: remoteXform.rotation }
+                    : obj;
               return (
               <React.Fragment key={obj.id}>
                 {obj.type === 'sticky' ? (
@@ -314,6 +333,8 @@ export function Canvas({
                     onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
                     onDragMove={makeDragMoveHandler(obj)}
                     onDragEndExtra={handleDragEndExtra}
+                    remoteEditing={remoteEdit}
+                    remoteTransform={remoteXform}
                   />
                 ) : (
                   <Rectangle
@@ -325,6 +346,7 @@ export function Canvas({
                     onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
                     onDragMove={makeDragMoveHandler(obj)}
                     onDragEndExtra={handleDragEndExtra}
+                    remoteTransform={remoteXform}
                   />
                 )}
                 <Transformer
@@ -366,6 +388,8 @@ export function Canvas({
                     return newBox;
                   }}
                   onTransformStart={() => {
+                    isTransformingRef.current = true;
+                    startDimensionLabelRafLoop();
                     const activeAnchor = transformerRef.current?.getActiveAnchor?.() ?? null;
                     if (activeAnchor === 'rotater') {
                       isRotatingGestureRef.current = true;
@@ -402,6 +426,7 @@ export function Canvas({
                       rotation: currentRotation,
                     };
 
+                    liveTransformRef.current = liveValues;
                     setLiveTransform(liveValues);
                     onLiveTransformChange?.(liveValues);
                     // Broadcast to remote users
@@ -432,6 +457,12 @@ export function Canvas({
                     });
 
                     // Clear live transform
+                    isTransformingRef.current = false;
+                    liveTransformRef.current = null;
+                    if (dimensionLabelRafRef.current != null) {
+                      cancelAnimationFrame(dimensionLabelRafRef.current);
+                      dimensionLabelRafRef.current = null;
+                    }
                     setLiveTransform(null);
                     onLiveTransformChange?.(null);
                     setTransformMode('idle');
@@ -484,6 +515,8 @@ export function Canvas({
                   object={obj}
                   transformMode={transformMode}
                   liveTransform={liveTransform}
+                  liveTransformRef={liveTransformRef}
+                  dimensionLabelTick={dimensionLabelTick}
                 />
               </React.Fragment>
               );

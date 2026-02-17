@@ -28,6 +28,7 @@ export interface PresenceData {
   color: string;
   online: boolean;
   joinedAt: number;
+  lastActive?: number;
 }
 
 export interface LiveTransformData {

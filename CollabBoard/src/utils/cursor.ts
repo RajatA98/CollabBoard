@@ -10,15 +10,20 @@ export function hashColor(uid: string): string {
   return CURSOR_COLORS[Math.abs(hash) % CURSOR_COLORS.length];
 }
 
+/** Cursors older than this (ms) are considered offline and filtered out */
+export const CURSOR_STALE_MS = 15000;
+
 export function filterRemoteCursors(
   allCursors: Record<string, CursorData>,
-  localUserId: string
+  localUserId: string,
+  staleMs: number = CURSOR_STALE_MS
 ): Record<string, CursorData> {
+  const now = Date.now();
   const filtered: Record<string, CursorData> = {};
   for (const [uid, cursor] of Object.entries(allCursors)) {
-    if (uid !== localUserId) {
-      filtered[uid] = cursor;
-    }
+    if (uid === localUserId) continue;
+    if (cursor && cursor.lastActive && now - cursor.lastActive > staleMs) continue;
+    filtered[uid] = cursor;
   }
   return filtered;
 }

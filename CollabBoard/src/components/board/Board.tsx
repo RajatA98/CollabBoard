@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { Toolbar } from './Toolbar';
 import { Canvas } from './Canvas';
@@ -26,7 +26,7 @@ export function Board() {
   const { user, logout } = useAuth();
   const { objects, addObject, updateObject, deleteObject, clearObjects } = useBoardObjects(boardId);
   const { cursors, updateCursor, cleanupCursor } = useCursors(boardId, user);
-  const { onlineUsers, cleanupPresence } = usePresence(boardId, user);
+  const { onlineUsers, cleanupPresence } = usePresence(boardId, user, cursors);
   const { viewport, setPosition, zoomAtPoint } = useViewport();
   const { remoteTransforms, broadcastTransform, clearTransform, cleanupTransform } = useLiveTransforms(boardId, user);
   const { remoteEditings, broadcastEditing, clearEditing, cleanupEditing } = useLiveEditing(boardId, user);
@@ -50,6 +50,27 @@ export function Board() {
   } | null>(null);
   const [stylePanelOpen, setStylePanelOpen] = useState(false);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef(viewport);
+  viewportRef.current = viewport;
+
+  // Cursor sync: use canvas container pointermove so cursor updates even when pointer is over selected shape/Transformer
+  useEffect(() => {
+    const container = canvasContainerRef.current;
+    if (!container) return;
+
+    const handlePointerMove = (e: PointerEvent) => {
+      const rect = container.getBoundingClientRect();
+      const screenX = e.clientX - rect.left;
+      const screenY = e.clientY - rect.top;
+      const v = viewportRef.current;
+      const worldX = (screenX - v.x) / v.scaleX;
+      const worldY = (screenY - v.y) / v.scaleY;
+      updateCursor(worldX, worldY);
+    };
+
+    container.addEventListener('pointermove', handlePointerMove);
+    return () => container.removeEventListener('pointermove', handlePointerMove);
+  }, [updateCursor]);
 
   console.log('📊 Board state:', { 
     objectCount: objects.length, 
@@ -190,8 +211,9 @@ export function Board() {
         text: obj.text || '',
       });
       setSelectedObjectId(obj.id);
+      broadcastEditing(obj.id, obj.text ?? '');
     },
-    [viewport]
+    [viewport, broadcastEditing]
   );
 
   const handleObjectDoubleClick = useCallback(

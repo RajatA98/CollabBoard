@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   setPresence,
   onPresenceChange,
@@ -6,11 +6,16 @@ import {
   removePresence,
 } from '../firebase/rtdb';
 import { hashColor } from '../utils/cursor';
-import { getOnlineUsers, createPresenceData } from '../utils/presence';
+import { getMergedOnlineUsers, createPresenceData } from '../utils/presence';
 import type { AppUser, PresenceData } from '../types';
+import type { CursorData } from '../types';
 
-export function usePresence(boardId: string, user: AppUser | null) {
-  const [onlineUsers, setOnlineUsers] = useState<PresenceData[]>([]);
+export function usePresence(
+  boardId: string,
+  user: AppUser | null,
+  cursors: Record<string, CursorData> = {}
+) {
+  const [rawPresence, setRawPresence] = useState<Record<string, PresenceData>>({});
   const currentUserRef = useRef<{ boardId: string; userId: string } | null>(null);
   const isCleaningUpRef = useRef(false);
 
@@ -32,6 +37,7 @@ export function usePresence(boardId: string, user: AppUser | null) {
         console.error('❌ usePresence: Failed to remove presence:', error);
       }
       currentUserRef.current = null;
+      isCleaningUpRef.current = false;
     }
   }, []);
 
@@ -41,16 +47,10 @@ export function usePresence(boardId: string, user: AppUser | null) {
       return;
     }
 
-    // Prevent setting presence if we're in the middle of cleanup
-    if (isCleaningUpRef.current) {
-      console.log('👥 usePresence: Cleanup in progress, skipping presence setup');
-      return;
-    }
+    // Reset cleanup flag - we're setting up (fresh mount or after board/user change)
+    isCleaningUpRef.current = false;
 
     console.log('👥 usePresence: Setting up presence for', user.displayName || user.email, 'on board', boardId);
-    
-    // Reset cleanup flag when setting up fresh
-    isCleaningUpRef.current = false;
     
     // Store current user info for cleanup
     currentUserRef.current = { boardId, userId: user.uid };
@@ -71,9 +71,7 @@ export function usePresence(boardId: string, user: AppUser | null) {
 
     const unsubscribe = onPresenceChange(boardId, (allPresence) => {
       console.log('👥 usePresence: Received presence update from Firebase RTDB:', allPresence);
-      const users = getOnlineUsers(allPresence);
-      console.log('👥 usePresence: Online users:', users);
-      setOnlineUsers(users);
+      setRawPresence(allPresence ?? {});
     });
 
     return () => {
@@ -86,6 +84,21 @@ export function usePresence(boardId: string, user: AppUser | null) {
       }
     };
   }, [boardId, user, cleanupPresence]);
+
+  // Merge presence with cursors - if cursor is active, user is online
+  const onlineUsers = useMemo(() => {
+    const localPresence = user ? rawPresence[user.uid] ?? null : null;
+    const localFallback = user
+      ? { name: user.displayName || user.email || 'Anonymous', color: hashColor(user.uid) }
+      : undefined;
+    return getMergedOnlineUsers(
+      rawPresence,
+      cursors,
+      user?.uid ?? '',
+      localPresence,
+      localFallback
+    );
+  }, [rawPresence, cursors, user]);
 
   return { onlineUsers, cleanupPresence };
 }
