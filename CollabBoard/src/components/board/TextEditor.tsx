@@ -6,11 +6,12 @@ interface TextEditorProps {
   width: number;
   height: number;
   text: string;
+  color?: string;
   onSubmit: (text: string) => void;
   onCancel: () => void;
 }
 
-export function TextEditor({ x, y, width, height, text, onSubmit, onCancel }: TextEditorProps) {
+export function TextEditor({ x, y, width, height, text, color = '#FFD54F', onSubmit, onCancel }: TextEditorProps) {
   const [value, setValue] = useState(text);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -50,7 +51,7 @@ export function TextEditor({ x, y, width, height, text, onSubmit, onCancel }: Te
         borderRadius: '2px',
         resize: 'none',
         outline: 'none',
-        background: '#FFD54F',
+        background: color,
         color: '#333',
         zIndex: 1000,
         boxShadow: '2px 4px 8px rgba(0,0,0,0.3)',

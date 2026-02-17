@@ -4,11 +4,15 @@ import { Toolbar } from './Toolbar';
 import { Canvas } from './Canvas';
 import { TextEditor } from './TextEditor';
 import { PresenceBar } from './PresenceBar';
+import { ShapeSidebar } from './ShapeSidebar';
+import { StylePanel } from './StylePanel';
+import { ContextMenu } from './ContextMenu';
 import { useAuth } from '../../hooks/useAuth';
 import { useBoardObjects } from '../../hooks/useBoardObjects';
 import { useCursors } from '../../hooks/useCursors';
 import { usePresence } from '../../hooks/usePresence';
 import { useViewport } from '../../hooks/useViewport';
+import { screenToWorld } from '../../utils/coordinates';
 import type { BoardObject } from '../../types';
 
 function generateId() {
@@ -18,12 +22,20 @@ function generateId() {
 export function Board() {
   const { boardId = 'default' } = useParams();
   const { user, logout } = useAuth();
-  const { objects, addObject, updateObject, deleteObject } = useBoardObjects(boardId);
-  const { cursors, updateCursor, hideCursor } = useCursors(boardId, user);
+  const { objects, addObject, updateObject, deleteObject, clearObjects } = useBoardObjects(boardId);
+  const { cursors, updateCursor } = useCursors(boardId, user);
   const { onlineUsers } = usePresence(boardId, user);
   const { viewport, setPosition, zoomAtPoint } = useViewport();
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; objectId: string } | null>(null);
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const [liveTransform, setLiveTransform] = useState<{
+    width: number;
+    height: number;
+    x: number;
+    y: number;
+    rotation: number;
+  } | null>(null);
   const [editingObject, setEditingObject] = useState<{
     id: string;
     x: number;
@@ -32,6 +44,8 @@ export function Board() {
     height: number;
     text: string;
   } | null>(null);
+  const [stylePanelOpen, setStylePanelOpen] = useState(false);
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
 
   console.log('📊 Board state:', { 
     objectCount: objects.length, 
@@ -112,19 +126,10 @@ export function Board() {
       });
   }, [addObject, user, viewport]);
 
-  const handleAddRectangle = useCallback(() => {
-    console.log('🔵 Rectangle button clicked!');
-    createObjectAtCenter('rectangle');
-  }, [createObjectAtCenter]);
-
-  const handleAddStickyNote = useCallback(() => {
-    console.log('🟨 Sticky Note button clicked!');
-    createObjectAtCenter('sticky');
-  }, [createObjectAtCenter]);
-
   const handleCanvasClick = useCallback(() => {
     // Clicking empty canvas deselects
     setSelectedObjectId(null);
+    setContextMenu(null);
   }, []);
 
   const handleObjectUpdate = useCallback(
@@ -166,39 +171,169 @@ export function Board() {
     [updateCursor]
   );
 
-  const handleObjectDoubleClick = useCallback(
+  const openTextEditorForObject = useCallback(
     (obj: BoardObject) => {
-      console.log('📝 handleObjectDoubleClick called', { objId: obj.id, type: obj.type });
-      
-      if (obj.type === 'sticky') {
-        console.log('✅ Opening text editor for sticky note', obj);
-        
-        // Convert world coordinates to screen coordinates for the text editor
-        const screenX = obj.x * viewport.scaleX + viewport.x;
-        const screenY = obj.y * viewport.scaleY + viewport.y;
-        const screenWidth = obj.width * viewport.scaleX;
-        const screenHeight = obj.height * viewport.scaleY;
-        
-        console.log('📍 Editor position:', {
-          world: { x: obj.x, y: obj.y, w: obj.width, h: obj.height },
-          screen: { x: screenX, y: screenY, w: screenWidth, h: screenHeight },
-          viewport
-        });
-        
-        setEditingObject({
-          id: obj.id,
-          x: screenX,
-          y: screenY,
-          width: screenWidth,
-          height: screenHeight,
-          text: obj.text || '',
-        });
-      } else {
-        console.log('ℹ️ Not a sticky note, skipping editor');
-      }
+      if (obj.type !== 'sticky') return;
+      const screenX = obj.x * viewport.scaleX + viewport.x;
+      const screenY = obj.y * viewport.scaleY + viewport.y;
+      const screenWidth = obj.width * viewport.scaleX;
+      const screenHeight = obj.height * viewport.scaleY;
+      setEditingObject({
+        id: obj.id,
+        x: screenX,
+        y: screenY,
+        width: screenWidth,
+        height: screenHeight,
+        text: obj.text || '',
+      });
+      setSelectedObjectId(obj.id);
     },
     [viewport]
   );
+
+  const handleObjectDoubleClick = useCallback(
+    (obj: BoardObject) => {
+      if (obj.type === 'sticky') {
+        openTextEditorForObject(obj);
+      }
+      // Rectangle: no-op on double-click
+    },
+    [openTextEditorForObject]
+  );
+
+  const duplicateObject = useCallback(
+    (id: string) => {
+      const obj = objects.find((o) => o.id === id);
+      if (!obj || !user) return;
+      const newId = generateId();
+      const newObject: BoardObject = {
+        ...obj,
+        id: newId,
+        x: obj.x + 20,
+        y: obj.y + 20,
+        createdBy: user.uid,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        updatedBy: user.uid,
+      };
+      addObject(newObject)
+        .then(() => setSelectedObjectId(newId))
+        .catch((err) => console.error('❌ Failed to duplicate object:', err));
+    },
+    [objects, user, addObject]
+  );
+
+  const handleObjectRightClick = useCallback((obj: BoardObject, screenPos: { x: number; y: number }) => {
+    setSelectedObjectId(obj.id);
+    setContextMenu({ x: screenPos.x, y: screenPos.y, objectId: obj.id });
+  }, []);
+
+  const handleShapeDrop = useCallback(
+    (shapeType: 'rectangle' | 'sticky', screenX: number, screenY: number) => {
+      if (!user) {
+        console.error('❌ No user found - cannot create object');
+        return;
+      }
+
+      // Convert screen coordinates to world coordinates
+      const worldPos = screenToWorld(screenX, screenY, viewport);
+
+      const id = generateId();
+      let newObject: BoardObject;
+
+      if (shapeType === 'sticky') {
+        const noteWidth = 200;
+        const noteHeight = 200;
+        newObject = {
+          id,
+          type: 'sticky',
+          x: worldPos.x - noteWidth / 2,
+          y: worldPos.y - noteHeight / 2,
+          width: noteWidth,
+          height: noteHeight,
+          rotation: 0,
+          text: '',
+          color: '#FFD54F',
+          createdBy: user.uid,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          updatedBy: user.uid,
+        };
+      } else {
+        const rectWidth = 200;
+        const rectHeight = 150;
+        newObject = {
+          id,
+          type: 'rectangle',
+          x: worldPos.x - rectWidth / 2,
+          y: worldPos.y - rectHeight / 2,
+          width: rectWidth,
+          height: rectHeight,
+          rotation: 0,
+          color: '#90CAF9',
+          createdBy: user.uid,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          updatedBy: user.uid,
+        };
+      }
+
+      addObject(newObject)
+        .then(() => {
+          console.log(`✅ ${shapeType} added via drag-and-drop`);
+          setSelectedObjectId(id);
+        })
+        .catch((err) => {
+          console.error(`❌ Failed to add ${shapeType}:`, err);
+        });
+    },
+    [addObject, user, viewport]
+  );
+
+  const handleCanvasDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  }, []);
+
+  const handleCanvasDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      const shapeType = e.dataTransfer.getData('shape-type') as 'rectangle' | 'sticky';
+      
+      if (shapeType && canvasContainerRef.current) {
+        const rect = canvasContainerRef.current.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        handleShapeDrop(shapeType, x, y);
+      }
+    },
+    [handleShapeDrop]
+  );
+
+  const handleSelectedObjectUpdate = useCallback(
+    (updates: Partial<BoardObject>) => {
+      if (selectedObjectId) {
+        handleObjectUpdate(selectedObjectId, updates);
+      }
+    },
+    [selectedObjectId, handleObjectUpdate]
+  );
+
+  const handleClearBoard = useCallback(async () => {
+    if (objects.length === 0) return;
+    const ok = window.confirm('Clear the board? This will delete all objects for everyone in this board.');
+    if (!ok) return;
+
+    setSelectedObjectId(null);
+    setContextMenu(null);
+    setEditingObject(null);
+    await clearObjects();
+  }, [objects.length, clearObjects]);
+
+  const selectedObject = objects.find((obj) => obj.id === selectedObjectId) || null;
+  const contextMenuObject = contextMenu
+    ? objects.find((obj) => obj.id === contextMenu.objectId) || null
+    : null;
 
   return (
     <div className="board-container">
@@ -223,7 +358,72 @@ export function Board() {
           viewport={viewport}
           setPosition={setPosition}
           zoomAtPoint={zoomAtPoint}
+      <Toolbar onLogout={logout} />
+      <div className="board-content">
+        <ShapeSidebar
+          onShapeClick={createObjectAtCenter}
         />
+        <div className="board-main">
+          <PresenceBar onlineUsers={onlineUsers} />
+          <div 
+            ref={canvasContainerRef}
+            className="canvas-area" 
+            style={{ position: 'relative' }}
+            onDragOver={handleCanvasDragOver}
+            onDrop={handleCanvasDrop}
+          >
+            <Canvas
+              objects={objects}
+              onObjectUpdate={handleObjectUpdate}
+              onObjectDelete={handleObjectDelete}
+              onCanvasClick={handleCanvasClick}
+              onObjectDoubleClick={handleObjectDoubleClick}
+              onObjectRightClick={handleObjectRightClick}
+              onDuplicateObject={duplicateObject}
+              remoteCursors={cursors}
+              onMouseMove={handleMouseMove}
+              selectedObjectId={selectedObjectId}
+              onSelectObject={setSelectedObjectId}
+              viewport={viewport}
+              setPosition={setPosition}
+              zoomAtPoint={zoomAtPoint}
+              isEditingText={!!editingObject}
+              onLiveTransformChange={setLiveTransform}
+            />
+            <button
+              type="button"
+              className="tool-btn canvas-clear-btn"
+              onClick={handleClearBoard}
+              disabled={objects.length === 0}
+              aria-label="Clear board"
+              data-testid="clear-board-btn"
+            >
+              Clear
+            </button>
+        {contextMenu && contextMenuObject && (
+          <ContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            objectType={contextMenuObject.type}
+            onEditText={
+              contextMenuObject.type === 'sticky'
+                ? () => {
+                    openTextEditorForObject(contextMenuObject);
+                    setContextMenu(null);
+                  }
+                : undefined
+            }
+            onDuplicate={() => {
+              duplicateObject(contextMenu.objectId);
+              setContextMenu(null);
+            }}
+            onDelete={() => {
+              handleObjectDelete(contextMenu.objectId);
+              setContextMenu(null);
+            }}
+            onClose={() => setContextMenu(null)}
+          />
+        )}
         {editingObject && (
           <TextEditor
             x={editingObject.x}
@@ -231,8 +431,31 @@ export function Board() {
             width={editingObject.width}
             height={editingObject.height}
             text={editingObject.text}
+            color={objects.find(obj => obj.id === editingObject.id)?.color}
             onSubmit={handleTextSubmit}
             onCancel={() => setEditingObject(null)}
+          />
+        )}
+          </div>
+        </div>
+        {selectedObject && !stylePanelOpen && (
+          <button
+            type="button"
+            className="style-panel-tab"
+            onClick={() => setStylePanelOpen(true)}
+            aria-label="Open style panel"
+            data-testid="style-panel-tab"
+          >
+            <span className="style-panel-tab-arrow" aria-hidden>‹</span>
+          </button>
+        )}
+        {selectedObject && stylePanelOpen && (
+          <StylePanel
+            key={selectedObject.id}
+            selectedObject={selectedObject}
+            onUpdate={handleSelectedObjectUpdate}
+            liveTransform={liveTransform}
+            onCollapse={() => setStylePanelOpen(false)}
           />
         )}
       </div>

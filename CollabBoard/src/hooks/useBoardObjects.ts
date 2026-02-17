@@ -5,6 +5,7 @@ import {
   addObject as fbAddObject,
   updateObject as fbUpdateObject,
   deleteObject as fbDeleteObject,
+  clearObjects as fbClearObjects,
 } from '../firebase/firestore';
 import type { BoardObject } from '../types';
 
@@ -53,5 +54,9 @@ export function useBoardObjects(boardId: string) {
     [boardId]
   );
 
-  return { objects, addObject, updateObject, deleteObject };
+  const clearObjects = useCallback(async () => {
+    await fbClearObjects(boardId);
+  }, [boardId]);
+
+  return { objects, addObject, updateObject, deleteObject, clearObjects };
 }

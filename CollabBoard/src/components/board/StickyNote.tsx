@@ -1,5 +1,6 @@
 import { Rect, Text, Group } from 'react-konva';
 import type { BoardObject } from '../../types';
+import type { KonvaEventObject } from 'konva/lib/Node';
 
 interface StickyNoteProps {
   object: BoardObject;
@@ -7,9 +8,10 @@ interface StickyNoteProps {
   onSelect: () => void;
   onUpdate: (updates: Partial<BoardObject>) => void;
   onDoubleClick?: () => void;
+  onRightClick?: (screenX: number, screenY: number) => void;
 }
 
-export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleClick }: StickyNoteProps) {
+export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleClick, onRightClick }: StickyNoteProps) {
   const handleDoubleClick = () => {
     console.log('🖱️ Sticky note double-clicked!', object.id);
     if (onDoubleClick) {
@@ -19,20 +21,41 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
     }
   };
 
+  const handleClick = (e: KonvaEventObject<MouseEvent>) => {
+    if (e.evt && e.evt.button === 2) {
+      e.evt.preventDefault();
+      const stage = e.target.getStage();
+      const pointer = stage?.getPointerPosition();
+      if (pointer) onRightClick?.(pointer.x, pointer.y);
+    } else {
+      onSelect();
+    }
+  };
+
+  const handleContextMenu = (e: KonvaEventObject<MouseEvent>) => {
+    e.evt.preventDefault();
+    const stage = e.target.getStage();
+    const pointer = stage?.getPointerPosition();
+    if (pointer) onRightClick?.(pointer.x, pointer.y);
+  };
+
   return (
     <Group
+      id={object.id}
       x={object.x}
       y={object.y}
+      rotation={object.rotation || 0}
       draggable
-      onClick={onSelect}
+      onClick={handleClick}
       onTap={onSelect}
       onDblClick={handleDoubleClick}
       onDblTap={handleDoubleClick}
+      onContextMenu={handleContextMenu}
       onDragEnd={(e) => {
         onUpdate({ x: e.target.x(), y: e.target.y() });
       }}
     >
-      {/* Post-it note background with realistic styling */}
+      {/* Note background */}
       <Rect
         width={object.width}
         height={object.height}
@@ -46,22 +69,23 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
         shadowOffsetY={4}
         shadowOpacity={0.3}
       />
-      {/* Bottom-right corner curl effect (paper rolling up) */}
-      <Rect
-        x={object.width - 30}
-        y={object.height - 30}
-        width={30}
-        height={30}
-        fill="rgba(0,0,0,0.08)"
-        cornerRadius={2}
+      {/* "Note:" label at top left */}
+      <Text
+        text="Note:"
+        x={8}
+        y={6}
+        fontSize={12}
+        fontFamily="'Segoe UI', system-ui, sans-serif"
+        fill="#666"
+        fontStyle="bold"
       />
       {/* Text content */}
       <Text
-        text={object.text ?? 'Double-click to edit'}
+        text={object.text ?? 'Click to edit'}
         width={object.width - 16}
-        height={object.height - 16}
+        height={object.height - 28}
         x={8}
-        y={8}
+        y={26}
         fontSize={16}
         fontFamily="'Segoe Print', 'Comic Sans MS', cursive"
         fill={object.text ? '#333' : '#999'}

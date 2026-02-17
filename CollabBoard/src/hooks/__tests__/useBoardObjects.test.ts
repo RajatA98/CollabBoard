@@ -6,6 +6,7 @@ const mockCollection = vi.fn();
 const mockAddObject = vi.fn();
 const mockUpdateObject = vi.fn();
 const mockDeleteObject = vi.fn();
+const mockClearObjects = vi.fn();
 
 vi.mock('firebase/firestore', () => ({
   collection: (...args: unknown[]) => mockCollection(...args),
@@ -20,6 +21,7 @@ vi.mock('../../firebase/firestore', () => ({
   addObject: (...args: unknown[]) => mockAddObject(...args),
   updateObject: (...args: unknown[]) => mockUpdateObject(...args),
   deleteObject: (...args: unknown[]) => mockDeleteObject(...args),
+  clearObjects: (...args: unknown[]) => mockClearObjects(...args),
 }));
 
 describe('useBoardObjects', () => {
@@ -33,6 +35,7 @@ describe('useBoardObjects', () => {
     mockAddObject.mockResolvedValue(undefined);
     mockUpdateObject.mockResolvedValue(undefined);
     mockDeleteObject.mockResolvedValue(undefined);
+    mockClearObjects.mockResolvedValue(undefined);
   });
 
   it('should return empty objects array initially', async () => {
@@ -120,5 +123,16 @@ describe('useBoardObjects', () => {
     });
 
     expect(mockDeleteObject).toHaveBeenCalledWith('board-1', 'obj-1');
+  });
+
+  it('should call clearObjects when clearing', async () => {
+    const { useBoardObjects } = await import('../useBoardObjects');
+    const { result } = renderHook(() => useBoardObjects('board-1'));
+
+    await act(async () => {
+      await result.current.clearObjects();
+    });
+
+    expect(mockClearObjects).toHaveBeenCalledWith('board-1');
   });
 });
