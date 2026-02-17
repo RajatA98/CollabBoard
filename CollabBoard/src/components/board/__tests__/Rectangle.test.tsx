@@ -4,15 +4,22 @@ import { Rectangle } from '../Rectangle';
 import type { BoardObject } from '../../../types';
 
 vi.mock('react-konva', () => ({
-  Rect: ({ onClick, ...props }: Record<string, unknown>) => (
+  Group: ({ onClick, children, ...props }: Record<string, unknown>) => (
+    <div data-testid="rectangle-group" data-id={props.id} onClick={onClick as () => void}>
+      {children as React.ReactNode}
+    </div>
+  ),
+  Rect: ({ ...props }: Record<string, unknown>) => (
     <div
       data-testid="rectangle"
       data-fill={props.fill}
       data-width={props.width}
       data-height={props.height}
       data-stroke={props.stroke}
-      onClick={onClick as () => void}
     />
+  ),
+  Text: ({ ...props }: Record<string, unknown>) => (
+    <span data-testid="rectangle-text" data-text={props.text} />
   ),
 }));
 
@@ -54,7 +61,7 @@ describe('Rectangle', () => {
   it('should call onSelect when clicked', () => {
     const mockSelect = vi.fn();
     render(<Rectangle object={mockObject} isSelected={false} onSelect={mockSelect} onUpdate={vi.fn()} />);
-    screen.getByTestId('rectangle').click();
+    screen.getByTestId('rectangle-group').click();
     expect(mockSelect).toHaveBeenCalled();
   });
 });

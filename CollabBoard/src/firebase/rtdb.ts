@@ -1,6 +1,6 @@
 import { ref, set, onValue, onDisconnect, remove } from 'firebase/database';
 import { rtdb } from './config';
-import type { CursorData, PresenceData } from '../types';
+import type { CursorData, PresenceData, LiveTransformData, LiveEditingData } from '../types';
 
 export function getCursorRef(boardId: string, userId: string) {
   return ref(rtdb, `boards/${boardId}/cursors/${userId}`);
@@ -94,11 +94,107 @@ export function setupPresenceDisconnect(boardId: string, userId: string) {
   onDisconnect(presenceRef).remove();
 }
 
+// --- Live Transform operations ---
+
+export function getTransformRef(boardId: string, userId: string) {
+  return ref(rtdb, `boards/${boardId}/transforms/${userId}`);
+}
+
+export function getTransformsRef(boardId: string) {
+  return ref(rtdb, `boards/${boardId}/transforms`);
+}
+
+export async function setTransform(boardId: string, userId: string, data: LiveTransformData) {
+  const transformRef = getTransformRef(boardId, userId);
+  try {
+    await set(transformRef, data);
+  } catch (error) {
+    console.error('Failed to set live transform:', error);
+  }
+}
+
+export async function removeTransform(boardId: string, userId: string) {
+  const transformRef = getTransformRef(boardId, userId);
+  await remove(transformRef);
+}
+
+export function onTransformsChange(
+  boardId: string,
+  callback: (transforms: Record<string, LiveTransformData>) => void
+): () => void {
+  const transformsRef = getTransformsRef(boardId);
+  const unsubscribe = onValue(
+    transformsRef,
+    (snapshot) => {
+      callback(snapshot.val() ?? {});
+    },
+    (error) => {
+      console.error('Error listening to live transforms:', error);
+    }
+  );
+  return unsubscribe;
+}
+
+export function setupTransformDisconnect(boardId: string, userId: string) {
+  const transformRef = getTransformRef(boardId, userId);
+  onDisconnect(transformRef).remove();
+}
+
+// --- Live Editing operations ---
+
+export function getEditingRef(boardId: string, userId: string) {
+  return ref(rtdb, `boards/${boardId}/editing/${userId}`);
+}
+
+export function getEditingsRef(boardId: string) {
+  return ref(rtdb, `boards/${boardId}/editing`);
+}
+
+export async function setEditing(boardId: string, userId: string, data: LiveEditingData) {
+  const editingRef = getEditingRef(boardId, userId);
+  try {
+    await set(editingRef, data);
+  } catch (error) {
+    console.error('Failed to set live editing:', error);
+  }
+}
+
+export async function removeEditing(boardId: string, userId: string) {
+  const editingRef = getEditingRef(boardId, userId);
+  await remove(editingRef);
+}
+
+export function onEditingsChange(
+  boardId: string,
+  callback: (editings: Record<string, LiveEditingData>) => void
+): () => void {
+  const editingsRef = getEditingsRef(boardId);
+  const unsubscribe = onValue(
+    editingsRef,
+    (snapshot) => {
+      callback(snapshot.val() ?? {});
+    },
+    (error) => {
+      console.error('Error listening to live editing:', error);
+    }
+  );
+  return unsubscribe;
+}
+
+export function setupEditingDisconnect(boardId: string, userId: string) {
+  const editingRef = getEditingRef(boardId, userId);
+  onDisconnect(editingRef).remove();
+}
+
+// --- Cleanup ---
+
 export async function cleanupUserData(boardId: string, userId: string) {
-  console.log('🧹 Cleaning up user data for logout:', { boardId, userId });
+  console.log('Cleaning up user data for logout:', { boardId, userId });
   await Promise.all([
     removePresence(boardId, userId),
     removeCursor(boardId, userId),
+    removeTransform(boardId, userId),
+    removeEditing(boardId, userId),
   ]);
-  console.log('✅ User data cleaned up successfully');
+  console.log('User data cleaned up successfully');
 }

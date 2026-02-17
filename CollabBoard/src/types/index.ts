@@ -28,6 +28,27 @@ export interface PresenceData {
   color: string;
   online: boolean;
   joinedAt: number;
+  lastActive?: number;
+}
+
+export interface LiveTransformData {
+  objectId: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  userName: string;
+  userColor: string;
+  lastActive: number;
+}
+
+export interface LiveEditingData {
+  objectId: string;
+  text: string;
+  userName: string;
+  userColor: string;
+  lastActive: number;
 }
 
 export interface AppUser {

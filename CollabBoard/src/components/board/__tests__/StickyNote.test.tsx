@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { StickyNote } from '../StickyNote';
-import type { BoardObject } from '../../../types';
+import type { BoardObject, LiveEditingData } from '../../../types';
 
 vi.mock('react-konva', () => ({
   Group: ({ children, onClick }: Record<string, unknown>) => (
@@ -53,5 +53,45 @@ describe('StickyNote', () => {
     const rects = screen.getAllByTestId('sticky-rect');
     expect(rects[0]).toHaveAttribute('data-width', '150');
     expect(rects[0]).toHaveAttribute('data-height', '100');
+  });
+
+  it('shows messaging-style typing... indicator when remoteEditing is provided', () => {
+    const remoteEditing: LiveEditingData = {
+      objectId: 'sticky-1',
+      text: 'Live typed text',
+      userName: 'Alice',
+      userColor: '#FF6B6B',
+      lastActive: Date.now(),
+    };
+    render(
+      <StickyNote
+        object={mockObject}
+        isSelected={false}
+        onSelect={vi.fn()}
+        onUpdate={vi.fn()}
+        remoteEditing={remoteEditing}
+      />
+    );
+    expect(screen.getByText('Alice typing...')).toBeInTheDocument();
+  });
+
+  it('shows remote editing text instead of object text when remoteEditing is provided', () => {
+    const remoteEditing: LiveEditingData = {
+      objectId: 'sticky-1',
+      text: 'Live typed text',
+      userName: 'Alice',
+      userColor: '#FF6B6B',
+      lastActive: Date.now(),
+    };
+    render(
+      <StickyNote
+        object={mockObject}
+        isSelected={false}
+        onSelect={vi.fn()}
+        onUpdate={vi.fn()}
+        remoteEditing={remoteEditing}
+      />
+    );
+    expect(screen.getByText('Live typed text')).toBeInTheDocument();
   });
 });
