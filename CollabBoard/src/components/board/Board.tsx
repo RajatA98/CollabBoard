@@ -47,6 +47,7 @@ export function Board() {
     width: number;
     height: number;
     text: string;
+    objectType: 'sticky' | 'text';
   } | null>(null);
   const [stylePanelOpen, setStylePanelOpen] = useState(false);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
@@ -81,29 +82,29 @@ export function Board() {
     remoteCursorCount: Object.keys(cursors).length 
   });
 
-  const createObjectAtCenter = useCallback((type: 'rectangle' | 'sticky') => {
+  const createObjectAtCenter = useCallback((type: 'rectangle' | 'sticky' | 'text') => {
     if (!user) {
       console.error('❌ No user found - cannot create object');
       return;
     }
-    
+
     console.log(`✅ User exists, creating ${type}...`);
-    
+
     // Calculate exact center of visible canvas in world coordinates
     const canvasWidth = window.innerWidth;
     const canvasHeight = window.innerHeight - 48; // Subtract toolbar height
-    
+
     // Screen space center
     const screenCenterX = canvasWidth / 2;
     const screenCenterY = canvasHeight / 2;
-    
+
     // Convert screen center to world coordinates
     const worldCenterX = (screenCenterX - viewport.x) / viewport.scaleX;
     const worldCenterY = (screenCenterY - viewport.y) / viewport.scaleY;
-    
+
     const id = generateId();
     let newObject: BoardObject;
-    
+
     if (type === 'sticky') {
       const noteWidth = 200;
       const noteHeight = 200;
@@ -123,6 +124,25 @@ export function Board() {
         updatedBy: user.uid,
       };
       console.log('📝 Creating sticky note:', newObject);
+    } else if (type === 'text') {
+      const textWidth = 200;
+      const textHeight = 40;
+      newObject = {
+        id,
+        type: 'text',
+        x: worldCenterX - (textWidth / 2),
+        y: worldCenterY - (textHeight / 2),
+        width: textWidth,
+        height: textHeight,
+        rotation: 0,
+        text: '',
+        color: 'transparent',
+        createdBy: user.uid,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        updatedBy: user.uid,
+      };
+      console.log('📝 Creating text element:', newObject);
     } else {
       const rectWidth = 200;
       const rectHeight = 150;
@@ -142,7 +162,7 @@ export function Board() {
       };
       console.log('🟦 Creating rectangle:', newObject);
     }
-    
+
     addObject(newObject)
       .then(() => {
         console.log(`✅ ${type} added to Firestore successfully`);
@@ -197,7 +217,7 @@ export function Board() {
 
   const openTextEditorForObject = useCallback(
     (obj: BoardObject) => {
-      if (obj.type !== 'sticky') return;
+      if (obj.type !== 'sticky' && obj.type !== 'text') return;
       const screenX = obj.x * viewport.scaleX + viewport.x;
       const screenY = obj.y * viewport.scaleY + viewport.y;
       const screenWidth = obj.width * viewport.scaleX;
@@ -209,6 +229,7 @@ export function Board() {
         width: screenWidth,
         height: screenHeight,
         text: obj.text || '',
+        objectType: obj.type as 'sticky' | 'text',
       });
       setSelectedObjectId(obj.id);
       broadcastEditing(obj.id, obj.text ?? '');
@@ -218,7 +239,7 @@ export function Board() {
 
   const handleObjectDoubleClick = useCallback(
     (obj: BoardObject) => {
-      if (obj.type === 'sticky') {
+      if (obj.type === 'sticky' || obj.type === 'text') {
         openTextEditorForObject(obj);
       }
       // Rectangle: no-op on double-click
@@ -254,7 +275,7 @@ export function Board() {
   }, []);
 
   const handleShapeDrop = useCallback(
-    (shapeType: 'rectangle' | 'sticky', screenX: number, screenY: number) => {
+    (shapeType: 'rectangle' | 'sticky' | 'text', screenX: number, screenY: number) => {
       if (!user) {
         console.error('❌ No user found - cannot create object');
         return;
@@ -279,6 +300,24 @@ export function Board() {
           rotation: 0,
           text: '',
           color: '#FFD54F',
+          createdBy: user.uid,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          updatedBy: user.uid,
+        };
+      } else if (shapeType === 'text') {
+        const textWidth = 200;
+        const textHeight = 40;
+        newObject = {
+          id,
+          type: 'text',
+          x: worldPos.x - textWidth / 2,
+          y: worldPos.y - textHeight / 2,
+          width: textWidth,
+          height: textHeight,
+          rotation: 0,
+          text: '',
+          color: 'transparent',
           createdBy: user.uid,
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -323,7 +362,7 @@ export function Board() {
   const handleCanvasDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
-      const shapeType = e.dataTransfer.getData('shape-type') as 'rectangle' | 'sticky';
+      const shapeType = e.dataTransfer.getData('shape-type') as 'rectangle' | 'sticky' | 'text';
       
       if (shapeType && canvasContainerRef.current) {
         const rect = canvasContainerRef.current.getBoundingClientRect();
@@ -424,7 +463,7 @@ export function Board() {
             y={contextMenu.y}
             objectType={contextMenuObject.type}
             onEditText={
-              contextMenuObject.type === 'sticky'
+              (contextMenuObject.type === 'sticky' || contextMenuObject.type === 'text')
                 ? () => {
                     openTextEditorForObject(contextMenuObject);
                     setContextMenu(null);
@@ -449,7 +488,8 @@ export function Board() {
             width={editingObject.width}
             height={editingObject.height}
             text={editingObject.text}
-            color={objects.find(obj => obj.id === editingObject.id)?.color}
+            color={editingObject.objectType === 'text' ? 'transparent' : objects.find(obj => obj.id === editingObject.id)?.color}
+            objectType={editingObject.objectType}
             onSubmit={handleTextSubmit}
             onCancel={() => {
               clearEditing();

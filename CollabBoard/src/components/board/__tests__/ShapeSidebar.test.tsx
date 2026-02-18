@@ -136,4 +136,24 @@ describe('ShapeSidebar', () => {
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByTestId('shape-dropdown-panel')).not.toBeInTheDocument();
   });
+
+  it('should show text template in dropdown when expanded', () => {
+    render(<ShapeSidebar />);
+
+    expect(screen.queryByTestId('shape-template-text')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('shape-dropdown-trigger'));
+
+    expect(screen.getByTestId('shape-template-text')).toBeInTheDocument();
+    expect(screen.getByTestId('shape-template-text')).toHaveAttribute('data-shape-type', 'text');
+  });
+
+  it('should call onShapeClick with text when text template is clicked', () => {
+    const onShapeClick = vi.fn();
+    render(<ShapeSidebar onShapeClick={onShapeClick} />);
+
+    fireEvent.click(screen.getByTestId('shape-dropdown-trigger'));
+    fireEvent.click(screen.getByTestId('shape-template-text'));
+    expect(onShapeClick).toHaveBeenCalledWith('text');
+  });
 });

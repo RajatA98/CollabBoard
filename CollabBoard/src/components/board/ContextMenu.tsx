@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react';
 export interface ContextMenuProps {
   x: number;
   y: number;
-  objectType: 'sticky' | 'rectangle';
+  objectType: 'sticky' | 'rectangle' | 'text';
   onEditText?: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
@@ -59,7 +59,7 @@ export function ContextMenu({
         minWidth: 160,
       }}
     >
-      {objectType === 'sticky' && onEditText && (
+      {(objectType === 'sticky' || objectType === 'text') && onEditText && (
         <button
           type="button"
           className="context-menu-item"

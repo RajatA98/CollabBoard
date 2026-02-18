@@ -1,11 +1,11 @@
 import { useRef, useState } from 'react';
 
 interface ShapeSidebarProps {
-  onShapeClick?: (shapeType: 'rectangle' | 'sticky') => void;
+  onShapeClick?: (shapeType: 'rectangle' | 'sticky' | 'text') => void;
 }
 
 interface ShapeTemplate {
-  type: 'rectangle' | 'sticky';
+  type: 'rectangle' | 'sticky' | 'text';
   label: string;
   icon: React.ReactNode;
 }
@@ -75,16 +75,48 @@ const shapeTemplates: ShapeTemplate[] = [
       </svg>
     ),
   },
+  {
+    type: 'text',
+    label: 'Text',
+    icon: (
+      <svg width="40" height="30" viewBox="0 0 40 30">
+        <rect
+          x="2"
+          y="2"
+          width="36"
+          height="26"
+          fill="none"
+          stroke="#666"
+          strokeWidth="1.5"
+          strokeDasharray="4 3"
+          rx="2"
+        />
+        <text
+          x="20"
+          y="17"
+          textAnchor="middle"
+          dominantBaseline="middle"
+          fill="#333"
+          fontSize="14"
+          fontWeight="bold"
+          fontFamily="system-ui, sans-serif"
+        >
+          T
+        </text>
+      </svg>
+    ),
+  },
 ];
 
 const stickyTemplate = shapeTemplates.find((t) => t.type === 'sticky')!;
 const rectangleTemplate = shapeTemplates.find((t) => t.type === 'rectangle')!;
+const textTemplate = shapeTemplates.find((t) => t.type === 'text')!;
 
 export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({ onShapeClick }) => {
   const didDragRef = useRef(false);
   const [shapesOpen, setShapesOpen] = useState(false);
 
-  const handleDragStart = (shapeType: 'rectangle' | 'sticky', e: React.DragEvent) => {
+  const handleDragStart = (shapeType: 'rectangle' | 'sticky' | 'text', e: React.DragEvent) => {
     didDragRef.current = true;
 
     if (e.dataTransfer) {
@@ -101,7 +133,7 @@ export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({ onShapeClick }) => {
     didDragRef.current = false;
   };
 
-  const handleClick = (shapeType: 'rectangle' | 'sticky') => {
+  const handleClick = (shapeType: 'rectangle' | 'sticky' | 'text') => {
     if (didDragRef.current) {
       didDragRef.current = false;
       return;
@@ -154,6 +186,19 @@ export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({ onShapeClick }) => {
                 aria-label="Rectangle"
               >
                 <div className="shape-icon">{rectangleTemplate.icon}</div>
+              </div>
+              <div
+                className="shape-template shape-template-icon-only"
+                data-testid="shape-template-text"
+                data-shape-type="text"
+                draggable
+                onClick={() => handleClick('text')}
+                onDragStart={(e) => handleDragStart('text', e)}
+                onDragEnd={handleDragEnd}
+                role="button"
+                aria-label="Text"
+              >
+                <div className="shape-icon">{textTemplate.icon}</div>
               </div>
             </div>
           )}

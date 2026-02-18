@@ -1,6 +1,6 @@
 export interface BoardObject {
   id: string;
-  type: 'sticky' | 'rectangle';
+  type: 'sticky' | 'rectangle' | 'text';
   x: number;
   y: number;
   width: number;

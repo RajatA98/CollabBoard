@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 
 interface TextEditorProps {
   x: number;
@@ -7,19 +7,35 @@ interface TextEditorProps {
   height: number;
   text: string;
   color?: string;
+  objectType?: 'sticky' | 'text';
   onSubmit: (text: string) => void;
   onCancel: () => void;
   onTextChange?: (text: string) => void;
 }
 
-export function TextEditor({ x, y, width, height, text, color = '#FFD54F', onSubmit, onCancel, onTextChange }: TextEditorProps) {
+export function TextEditor({ x, y, width, height, text, color = '#FFD54F', objectType = 'sticky', onSubmit, onCancel, onTextChange }: TextEditorProps) {
   const [value, setValue] = useState(text);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [textareaHeight, setTextareaHeight] = useState(height);
 
   useEffect(() => {
     textareaRef.current?.focus();
     textareaRef.current?.select();
   }, []);
+
+  // Auto-resize textarea height as content grows
+  const autoResize = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    const newHeight = Math.max(height, textarea.scrollHeight);
+    textarea.style.height = `${newHeight}px`;
+    setTextareaHeight(newHeight);
+  }, [height]);
+
+  useEffect(() => {
+    autoResize();
+  }, [value, autoResize]);
 
   const handleBlur = () => {
     onSubmit(value);
@@ -35,6 +51,8 @@ export function TextEditor({ x, y, width, height, text, color = '#FFD54F', onSub
     }
   };
 
+  const isTextType = objectType === 'text';
+
   return (
     <textarea
       ref={textareaRef}
@@ -44,18 +62,25 @@ export function TextEditor({ x, y, width, height, text, color = '#FFD54F', onSub
         left: x,
         top: y,
         width,
-        height,
+        height: textareaHeight,
         padding: '8px',
         fontSize: '16px',
-        fontFamily: "'Segoe Print', 'Comic Sans MS', cursive",
-        border: '3px solid #FFA726',
+        fontFamily: isTextType
+          ? "'Segoe UI', system-ui, sans-serif"
+          : "'Segoe Print', 'Comic Sans MS', cursive",
+        border: isTextType
+          ? '2px dashed #4285f4'
+          : '3px solid #FFA726',
         borderRadius: '2px',
         resize: 'none',
         outline: 'none',
-        background: color,
+        background: isTextType ? 'rgba(255,255,255,0.95)' : color,
         color: '#333',
         zIndex: 1000,
-        boxShadow: '2px 4px 8px rgba(0,0,0,0.3)',
+        boxShadow: isTextType
+          ? '0 2px 8px rgba(0,0,0,0.1)'
+          : '2px 4px 8px rgba(0,0,0,0.3)',
+        overflow: 'hidden',
       }}
       value={value}
       onChange={(e) => {
@@ -64,7 +89,7 @@ export function TextEditor({ x, y, width, height, text, color = '#FFD54F', onSub
       }}
       onBlur={handleBlur}
       onKeyDown={handleKeyDown}
-      placeholder="Type your note..."
+      placeholder={isTextType ? 'Type here...' : 'Type your note...'}
     />
   );
 }

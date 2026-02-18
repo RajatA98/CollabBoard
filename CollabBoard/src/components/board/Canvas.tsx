@@ -4,6 +4,7 @@ import type Konva from 'konva';
 import { GridBackground } from './GridBackground';
 import { StickyNote } from './StickyNote';
 import { Rectangle } from './Rectangle';
+import { TextElement } from './TextElement';
 import { RemoteCursor } from './RemoteCursor';
 import { DimensionLabel } from './DimensionLabel';
 import type { BoardObject, CursorData, LiveTransformData, LiveEditingData } from '../../types';
@@ -278,34 +279,54 @@ export function Canvas({
               ? { ...obj, x: remoteXform.x, y: remoteXform.y, width: remoteXform.width, height: remoteXform.height, rotation: remoteXform.rotation }
               : obj;
 
-            return obj.type === 'sticky' ? (
-              <StickyNote
-                key={obj.id}
-                object={displayObj}
-                isSelected={false}
-                onSelect={() => onSelectObject?.(obj.id)}
-                onUpdate={(updates) => onObjectUpdate(obj.id, updates)}
-                onDoubleClick={() => onObjectDoubleClick?.(obj)}
-                onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
-                onDragMove={makeDragMoveHandler(obj)}
-                onDragEndExtra={handleDragEndExtra}
-                remoteEditing={remoteEdit}
-                remoteTransform={remoteXform}
-              />
-            ) : (
-              <Rectangle
-                key={obj.id}
-                object={displayObj}
-                isSelected={false}
-                onSelect={() => onSelectObject?.(obj.id)}
-                onUpdate={(updates) => onObjectUpdate(obj.id, updates)}
-                onDoubleClick={() => onObjectDoubleClick?.(obj)}
-                onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
-                onDragMove={makeDragMoveHandler(obj)}
-                onDragEndExtra={handleDragEndExtra}
-                remoteTransform={remoteXform}
-              />
-            );
+            if (obj.type === 'sticky') {
+              return (
+                <StickyNote
+                  key={obj.id}
+                  object={displayObj}
+                  isSelected={false}
+                  onSelect={() => onSelectObject?.(obj.id)}
+                  onUpdate={(updates) => onObjectUpdate(obj.id, updates)}
+                  onDoubleClick={() => onObjectDoubleClick?.(obj)}
+                  onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
+                  onDragMove={makeDragMoveHandler(obj)}
+                  onDragEndExtra={handleDragEndExtra}
+                  remoteEditing={remoteEdit}
+                  remoteTransform={remoteXform}
+                />
+              );
+            } else if (obj.type === 'text') {
+              return (
+                <TextElement
+                  key={obj.id}
+                  object={displayObj}
+                  isSelected={false}
+                  onSelect={() => onSelectObject?.(obj.id)}
+                  onUpdate={(updates) => onObjectUpdate(obj.id, updates)}
+                  onDoubleClick={() => onObjectDoubleClick?.(obj)}
+                  onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
+                  onDragMove={makeDragMoveHandler(obj)}
+                  onDragEndExtra={handleDragEndExtra}
+                  remoteEditing={remoteEdit}
+                  remoteTransform={remoteXform}
+                />
+              );
+            } else {
+              return (
+                <Rectangle
+                  key={obj.id}
+                  object={displayObj}
+                  isSelected={false}
+                  onSelect={() => onSelectObject?.(obj.id)}
+                  onUpdate={(updates) => onObjectUpdate(obj.id, updates)}
+                  onDoubleClick={() => onObjectDoubleClick?.(obj)}
+                  onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
+                  onDragMove={makeDragMoveHandler(obj)}
+                  onDragEndExtra={handleDragEndExtra}
+                  remoteTransform={remoteXform}
+                />
+              );
+            }
           })}
         {/* Render selected object and its TransformHandles last so they are on top */}
         {selectedObjectId &&
@@ -325,6 +346,19 @@ export function Canvas({
               <React.Fragment key={obj.id}>
                 {obj.type === 'sticky' ? (
                   <StickyNote
+                    object={displayObject}
+                    isSelected
+                    onSelect={() => onSelectObject?.(obj.id)}
+                    onUpdate={(updates) => onObjectUpdate(obj.id, updates)}
+                    onDoubleClick={() => onObjectDoubleClick?.(obj)}
+                    onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
+                    onDragMove={makeDragMoveHandler(obj)}
+                    onDragEndExtra={handleDragEndExtra}
+                    remoteEditing={remoteEdit}
+                    remoteTransform={remoteXform}
+                  />
+                ) : obj.type === 'text' ? (
+                  <TextElement
                     object={displayObject}
                     isSelected
                     onSelect={() => onSelectObject?.(obj.id)}
