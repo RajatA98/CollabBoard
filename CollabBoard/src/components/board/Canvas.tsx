@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useEffect, useState, useMemo } from 'react';
+import { useRef, useCallback, useEffect, useState, useMemo } from 'react';
 import { Stage, Layer, Transformer } from 'react-konva';
 import type Konva from 'konva';
 import { GridBackground } from './GridBackground';
@@ -61,14 +61,14 @@ export function Canvas({
   selectedObjectIds,
   onSelectObject,
   onClearSelection,
-  onSelectAll,
-  onDeleteSelected,
-  onDuplicateSelected,
+  onSelectAll: _onSelectAll,
+  onDeleteSelected: _onDeleteSelected,
+  onDuplicateSelected: _onDuplicateSelected,
   onSetSelectedIds,
   viewport,
   setPosition,
   zoomAtPoint,
-  isEditingText = false,
+  isEditingText: _isEditingText = false,
   onLiveTransformChange,
   remoteTransforms = {},
   remoteEditings = {},
