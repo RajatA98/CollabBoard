@@ -1,11 +1,32 @@
+import { useNavigate } from 'react-router-dom';
+
 interface ToolbarProps {
   onLogout?: () => void;
 }
 
 export function Toolbar({ onLogout }: ToolbarProps) {
+  const navigate = useNavigate();
+
   return (
     <div className="toolbar" data-testid="toolbar">
-      <div className="toolbar-brand">CollabBoard</div>
+      <button
+        type="button"
+        className="tool-btn toolbar-back-btn"
+        onClick={() => navigate('/dashboard')}
+        aria-label="Back to boards"
+        data-testid="back-to-boards-btn"
+      >
+        ← Back to boards
+      </button>
+      <div
+        className="toolbar-brand"
+        onClick={() => navigate('/dashboard')}
+        style={{ cursor: 'pointer' }}
+        role="link"
+        aria-label="Back to dashboard"
+      >
+        CollabBoard
+      </div>
       <div className="toolbar-tools">
         {/* Shape tools moved to sidebar */}
       </div>
