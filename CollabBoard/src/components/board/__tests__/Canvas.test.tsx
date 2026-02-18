@@ -1,15 +1,15 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { Canvas } from '../Canvas';
 import type { BoardObject, LiveEditingData, LiveTransformData } from '../../../types';
 
 const mockStickyNote = vi.fn((props: Record<string, unknown>) => (
-  <div data-testid="sticky-note" data-remote-editing={props.remoteEditing ? JSON.stringify(props.remoteEditing) : undefined} data-remote-transform={props.remoteTransform ? JSON.stringify(props.remoteTransform) : undefined} data-object-id={props.object?.id}>
-    {props.object?.text}
+  <div data-testid="sticky-note" data-remote-editing={props.remoteEditing ? JSON.stringify(props.remoteEditing) : undefined} data-remote-transform={props.remoteTransform ? JSON.stringify(props.remoteTransform) : undefined} data-object-id={(props.object as BoardObject)?.id}>
+    {(props.object as BoardObject)?.text}
   </div>
 ));
 const mockRectangle = vi.fn((props: Record<string, unknown>) => (
-  <div data-testid="rectangle" data-remote-transform={props.remoteTransform ? JSON.stringify(props.remoteTransform) : undefined} data-object-id={props.object?.id} />
+  <div data-testid="rectangle" data-remote-transform={props.remoteTransform ? JSON.stringify(props.remoteTransform) : undefined} data-object-id={(props.object as BoardObject)?.id} />
 ));
 
 vi.mock('../StickyNote', () => ({ StickyNote: (props: Record<string, unknown>) => mockStickyNote(props) }));
@@ -32,6 +32,7 @@ vi.mock('react-konva', () => ({
 vi.mock('../GridBackground', () => ({ GridBackground: () => <div data-testid="grid" /> }));
 vi.mock('../RemoteCursor', () => ({ RemoteCursor: () => null }));
 vi.mock('../DimensionLabel', () => ({ DimensionLabel: () => null }));
+vi.mock('../SelectionRect', () => ({ SelectionRect: () => <div data-testid="selection-rect" /> }));
 
 vi.mock('konva', () => ({
   default: {},
@@ -73,40 +74,31 @@ describe('Canvas', () => {
     updatedBy: 'user-1',
   };
 
+  const baseProps = {
+    objects: [] as BoardObject[],
+    onObjectUpdate: vi.fn(),
+    onCanvasClick: vi.fn(),
+    onObjectDoubleClick: vi.fn(),
+    selectedObjectIds: [] as string[],
+    onSelectObject: vi.fn(),
+    onClearSelection: vi.fn(),
+    viewport: mockViewport,
+    setPosition: mockSetPosition,
+    zoomAtPoint: mockZoomAtPoint,
+  };
+
   beforeEach(() => {
     mockStickyNote.mockClear();
     mockRectangle.mockClear();
   });
 
   it('should render the stage', () => {
-    render(
-      <Canvas
-        objects={[]}
-        onObjectUpdate={vi.fn()}
-        onObjectDelete={vi.fn()}
-        onCanvasClick={vi.fn()}
-        onObjectDoubleClick={vi.fn()}
-        viewport={mockViewport}
-        setPosition={mockSetPosition}
-        zoomAtPoint={mockZoomAtPoint}
-      />
-    );
+    render(<Canvas {...baseProps} />);
     expect(screen.getByTestId('konva-stage')).toBeInTheDocument();
   });
 
   it('should render layers', () => {
-    render(
-      <Canvas
-        objects={[]}
-        onObjectUpdate={vi.fn()}
-        onObjectDelete={vi.fn()}
-        onCanvasClick={vi.fn()}
-        onObjectDoubleClick={vi.fn()}
-        viewport={mockViewport}
-        setPosition={mockSetPosition}
-        zoomAtPoint={mockZoomAtPoint}
-      />
-    );
+    render(<Canvas {...baseProps} />);
     const layers = screen.getAllByTestId('konva-layer');
     expect(layers.length).toBeGreaterThanOrEqual(1);
   });
@@ -125,14 +117,14 @@ describe('Canvas', () => {
       <Canvas
         objects={[stickyObject]}
         onObjectUpdate={vi.fn()}
-        onObjectDelete={vi.fn()}
         onCanvasClick={vi.fn()}
         onObjectDoubleClick={vi.fn()}
         viewport={mockViewport}
         setPosition={mockSetPosition}
         zoomAtPoint={mockZoomAtPoint}
-        selectedObjectId="sticky-1"
+        selectedObjectIds={['sticky-1']}
         onSelectObject={vi.fn()}
+        onClearSelection={vi.fn()}
         remoteEditings={remoteEditings}
       />
     );
@@ -161,14 +153,14 @@ describe('Canvas', () => {
       <Canvas
         objects={[stickyObject]}
         onObjectUpdate={vi.fn()}
-        onObjectDelete={vi.fn()}
         onCanvasClick={vi.fn()}
         onObjectDoubleClick={vi.fn()}
         viewport={mockViewport}
         setPosition={mockSetPosition}
         zoomAtPoint={mockZoomAtPoint}
-        selectedObjectId="sticky-1"
+        selectedObjectIds={['sticky-1']}
         onSelectObject={vi.fn()}
+        onClearSelection={vi.fn()}
         remoteTransforms={remoteTransforms}
       />
     );
@@ -198,14 +190,14 @@ describe('Canvas', () => {
       <Canvas
         objects={[stickyObject]}
         onObjectUpdate={vi.fn()}
-        onObjectDelete={vi.fn()}
         onCanvasClick={vi.fn()}
         onObjectDoubleClick={vi.fn()}
         viewport={mockViewport}
         setPosition={mockSetPosition}
         zoomAtPoint={mockZoomAtPoint}
-        selectedObjectId="sticky-1"
+        selectedObjectIds={['sticky-1']}
         onSelectObject={vi.fn()}
+        onClearSelection={vi.fn()}
         remoteTransforms={remoteTransforms}
       />
     );
@@ -237,14 +229,14 @@ describe('Canvas', () => {
       <Canvas
         objects={[rectObject]}
         onObjectUpdate={vi.fn()}
-        onObjectDelete={vi.fn()}
         onCanvasClick={vi.fn()}
         onObjectDoubleClick={vi.fn()}
         viewport={mockViewport}
         setPosition={mockSetPosition}
         zoomAtPoint={mockZoomAtPoint}
-        selectedObjectId="rect-1"
+        selectedObjectIds={['rect-1']}
         onSelectObject={vi.fn()}
+        onClearSelection={vi.fn()}
         remoteTransforms={remoteTransforms}
       />
     );
