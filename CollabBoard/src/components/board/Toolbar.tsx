@@ -1,3 +1,5 @@
+import { useNavigate } from 'react-router-dom';
+
 interface ToolbarProps {
   onLogout?: () => void;
   onUndo?: () => void;
@@ -7,9 +9,28 @@ interface ToolbarProps {
 }
 
 export function Toolbar({ onLogout, onUndo, onRedo, canUndo = false, canRedo = false }: ToolbarProps) {
+  const navigate = useNavigate();
+
   return (
     <div className="toolbar" data-testid="toolbar">
-      <div className="toolbar-brand">CollabBoard</div>
+      <button
+        type="button"
+        className="tool-btn toolbar-back-btn"
+        onClick={() => navigate('/dashboard')}
+        aria-label="Back to boards"
+        data-testid="back-to-boards-btn"
+      >
+        ← Back to boards
+      </button>
+      <div
+        className="toolbar-brand"
+        onClick={() => navigate('/dashboard')}
+        style={{ cursor: 'pointer' }}
+        role="link"
+        aria-label="Back to dashboard"
+      >
+        CollabBoard
+      </div>
       <div className="toolbar-tools">
         {onUndo && (
           <button

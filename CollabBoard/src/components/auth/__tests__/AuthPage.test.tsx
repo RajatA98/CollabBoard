@@ -53,7 +53,7 @@ describe('AuthPage', () => {
 
     await waitFor(() => {
       expect(signup).toHaveBeenCalledWith('test@test.com', 'password123', 'Test User');
-      expect(navigateMock).toHaveBeenCalledWith('/board/default', { replace: true });
+      expect(navigateMock).toHaveBeenCalledWith('/dashboard', { replace: true });
     });
   });
 
@@ -83,7 +83,7 @@ describe('AuthPage', () => {
 
     await waitFor(() => {
       expect(login).toHaveBeenCalledWith('test@test.com', 'password123');
-      expect(navigateMock).toHaveBeenCalledWith('/board/default', { replace: true });
+      expect(navigateMock).toHaveBeenCalledWith('/dashboard', { replace: true });
     });
   });
 

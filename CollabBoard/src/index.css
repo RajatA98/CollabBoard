@@ -141,6 +141,10 @@ html, body, #root {
   z-index: 100;
 }
 
+.toolbar-back-btn {
+  margin-right: 8px;
+}
+
 .toolbar-brand {
   font-weight: 700;
   font-size: 16px;
