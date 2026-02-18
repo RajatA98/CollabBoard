@@ -9,6 +9,15 @@ export function Toolbar({ onLogout }: ToolbarProps) {
 
   return (
     <div className="toolbar" data-testid="toolbar">
+      <button
+        type="button"
+        className="tool-btn toolbar-back-btn"
+        onClick={() => navigate('/dashboard')}
+        aria-label="Back to boards"
+        data-testid="back-to-boards-btn"
+      >
+        ← Back to boards
+      </button>
       <div
         className="toolbar-brand"
         onClick={() => navigate('/dashboard')}

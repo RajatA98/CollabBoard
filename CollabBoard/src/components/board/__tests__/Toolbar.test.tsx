@@ -33,6 +33,14 @@ describe('Toolbar', () => {
     expect(screen.getByText('CollabBoard')).toBeInTheDocument();
   });
 
+  it('should navigate to dashboard when Back to boards is clicked', async () => {
+    const user = userEvent.setup();
+    renderToolbar();
+
+    await user.click(screen.getByRole('button', { name: /back to boards/i }));
+    expect(navigateMock).toHaveBeenCalledWith('/dashboard');
+  });
+
   it('should navigate to dashboard when brand is clicked', async () => {
     const user = userEvent.setup();
     renderToolbar();
