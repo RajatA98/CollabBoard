@@ -159,6 +159,12 @@ html, body, #root {
   gap: 4px;
 }
 
+.toolbar-shortcut {
+  margin-left: 4px;
+  font-size: 11px;
+  color: #888;
+}
+
 .tool-btn {
   padding: 6px 12px;
   border: 1px solid #ddd;
@@ -434,8 +440,13 @@ html, body, #root {
   font-family: inherit;
 }
 
-.context-menu-item:hover {
+.context-menu-item:hover:not(:disabled) {
   background: #f0f0f0;
+}
+
+.context-menu-item:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .context-menu-item-danger:hover {

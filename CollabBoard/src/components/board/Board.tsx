@@ -34,7 +34,13 @@ export function Board() {
 
   // Multi-select state
   const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([]);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; objectId: string } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    objectId: string | null;
+    pasteWorldX: number;
+    pasteWorldY: number;
+  } | null>(null);
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
   const [liveTransform, setLiveTransform] = useState<{
     width: number;
@@ -55,6 +61,7 @@ export function Board() {
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef(viewport);
   viewportRef.current = viewport;
+  const lastDropHandledAtRef = useRef<number>(0);
 
   // Cursor sync: use canvas container pointermove so cursor updates even when pointer is over selected shape/Transformer
   useEffect(() => {
@@ -75,11 +82,14 @@ export function Board() {
     return () => container.removeEventListener('pointermove', handlePointerMove);
   }, [updateCursor]);
 
-  // Clipboard for copy/paste
+  // Clipboard for copy/paste (state so context menu can disable Paste when empty)
   const clipboardRef = useRef<BoardObject[]>([]);
+  const [clipboardCount, setClipboardCount] = useState(0);
+  // Last click position in world coords (for Ctrl+V paste)
+  const lastClickedWorldRef = useRef<{ x: number; y: number } | null>(null);
 
   // Undo/redo
-  const { pushAction, undo, redo } = useUndoRedo({
+  const { pushAction, undo, redo, canUndo, canRedo } = useUndoRedo({
     addObject,
     updateObject: async (id: string, updates: Partial<BoardObject>) => {
       await updateObject(id, updates);
@@ -198,14 +208,31 @@ export function Board() {
     [updateObject]
   );
 
-  // --- Delete selected (also copies to clipboard like cut) ---
+  // --- Delete selected (remove only, no clipboard) ---
   const handleDeleteSelected = useCallback(() => {
     if (selectedObjectIds.length === 0) return;
     const toDelete = objects.filter(o => selectedObjectIds.includes(o.id));
-    // Copy to clipboard before deleting (cut behavior)
-    clipboardRef.current = toDelete.map(o => ({ ...o }));
     toDelete.forEach(o => deleteObject(o.id));
     pushAction({ type: 'delete', objects: toDelete });
+    setSelectedObjectIds([]);
+  }, [selectedObjectIds, objects, deleteObject, pushAction]);
+
+  // --- Copy selected to clipboard ---
+  const handleCopySelected = useCallback(() => {
+    if (selectedObjectIds.length === 0) return;
+    const toCopy = objects.filter(o => selectedObjectIds.includes(o.id));
+    clipboardRef.current = toCopy.map(o => ({ ...o }));
+    setClipboardCount(toCopy.length);
+  }, [selectedObjectIds, objects]);
+
+  // --- Cut selected (copy to clipboard, then delete) ---
+  const handleCutSelected = useCallback(() => {
+    if (selectedObjectIds.length === 0) return;
+    const toCut = objects.filter(o => selectedObjectIds.includes(o.id));
+    clipboardRef.current = toCut.map(o => ({ ...o }));
+    setClipboardCount(toCut.length);
+    toCut.forEach(o => deleteObject(o.id));
+    pushAction({ type: 'delete', objects: toCut });
     setSelectedObjectIds([]);
   }, [selectedObjectIds, objects, deleteObject, pushAction]);
 
@@ -291,8 +318,51 @@ export function Board() {
 
   const handleObjectRightClick = useCallback((obj: BoardObject, screenPos: { x: number; y: number }) => {
     setSelectedObjectIds(prev => prev.includes(obj.id) ? prev : [obj.id]);
-    setContextMenu({ x: screenPos.x, y: screenPos.y, objectId: obj.id });
+    const world = screenToWorld(screenPos.x, screenPos.y, viewport);
+    setContextMenu({ x: screenPos.x, y: screenPos.y, objectId: obj.id, pasteWorldX: world.x, pasteWorldY: world.y });
+  }, [viewport]);
+
+  const handleCanvasRightClick = useCallback((screenPos: { x: number; y: number }) => {
+    const world = screenToWorld(screenPos.x, screenPos.y, viewport);
+    setContextMenu({ x: screenPos.x, y: screenPos.y, objectId: null, pasteWorldX: world.x, pasteWorldY: world.y });
+  }, [viewport]);
+
+  const handleLastClickPosition = useCallback((worldPos: { x: number; y: number }) => {
+    lastClickedWorldRef.current = worldPos;
   }, []);
+
+  // --- Paste from clipboard (optional worldPos = paste at cursor/context; else use last clicked) ---
+  const handlePaste = useCallback((worldPos?: { x: number; y: number }) => {
+    if (clipboardRef.current.length === 0 || !user) return;
+    const clip = clipboardRef.current;
+    const minX = Math.min(...clip.map(o => o.x));
+    const minY = Math.min(...clip.map(o => o.y));
+    const target = worldPos ?? lastClickedWorldRef.current ?? { x: minX + 20, y: minY + 20 };
+    const newIds: string[] = [];
+    const newObjects: BoardObject[] = [];
+    clip.forEach(obj => {
+      const newId = generateId();
+      newIds.push(newId);
+      newObjects.push({
+        ...obj,
+        id: newId,
+        x: target.x + (obj.x - minX),
+        y: target.y + (obj.y - minY),
+        createdBy: user.uid,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        updatedBy: user.uid,
+      });
+    });
+    Promise.all(newObjects.map(o => addObject(o)))
+      .then(() => {
+        setSelectedObjectIds(newIds);
+        pushAction({ type: 'add', objects: newObjects });
+        clipboardRef.current = newObjects.map(o => ({ ...o }));
+        setClipboardCount(newObjects.length);
+      })
+      .catch(err => console.error('❌ Failed to paste objects:', err));
+  }, [user, addObject, pushAction]);
 
   const handleShapeDrop = useCallback(
     (shapeType: 'rectangle' | 'sticky', screenX: number, screenY: number) => {
@@ -363,6 +433,15 @@ export function Board() {
   const handleCanvasDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
+      e.stopPropagation();
+
+      // Guard against duplicate drop events (browser can fire multiple times)
+      const now = Date.now();
+      if (now - lastDropHandledAtRef.current < 300) {
+        return;
+      }
+      lastDropHandledAtRef.current = now;
+
       const shapeType = e.dataTransfer.getData('shape-type') as 'rectangle' | 'sticky';
 
       if (shapeType && canvasContainerRef.current) {
@@ -440,53 +519,49 @@ export function Board() {
       // Ctrl+C = Copy
       if (e.key === 'c' && mod && selectedObjectIds.length > 0) {
         e.preventDefault();
-        const toCopy = objects.filter(o => selectedObjectIds.includes(o.id));
-        clipboardRef.current = toCopy.map(o => ({ ...o }));
+        handleCopySelected();
         return;
       }
 
       // Ctrl+X = Cut
       if (e.key === 'x' && mod && selectedObjectIds.length > 0) {
         e.preventDefault();
-        handleDeleteSelected();
+        handleCutSelected();
         return;
       }
 
       // Ctrl+V = Paste
       if (e.key === 'v' && mod && clipboardRef.current.length > 0) {
         e.preventDefault();
-        if (!user) return;
-        const newIds: string[] = [];
-        const newObjects: BoardObject[] = [];
-        clipboardRef.current.forEach(obj => {
-          const newId = generateId();
-          newIds.push(newId);
-          newObjects.push({
-            ...obj,
-            id: newId,
-            x: obj.x + 20,
-            y: obj.y + 20,
-            createdBy: user.uid,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-            updatedBy: user.uid,
-          });
-        });
-        Promise.all(newObjects.map(o => addObject(o)))
-          .then(() => {
-            setSelectedObjectIds(newIds);
-            pushAction({ type: 'add', objects: newObjects });
-            // Update clipboard positions for subsequent pastes
-            clipboardRef.current = newObjects.map(o => ({ ...o }));
-          })
-          .catch(err => console.error('❌ Failed to paste objects:', err));
+        handlePaste();
+        return;
+      }
+
+      // Ctrl+A = Select all
+      if (e.key === 'a' && mod) {
+        e.preventDefault();
+        selectAll();
+        return;
+      }
+
+      // Backspace/Delete = Delete selected (no clipboard)
+      if ((e.key === 'Backspace' || e.key === 'Delete') && selectedObjectIds.length > 0) {
+        e.preventDefault();
+        handleDeleteSelected();
+        return;
+      }
+
+      // Ctrl+D = Duplicate selected
+      if (e.key === 'd' && mod && selectedObjectIds.length > 0) {
+        e.preventDefault();
+        duplicateSelectedObjects();
         return;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedObjectIds, objects, user, addObject, editingObject, undo, redo, handleDeleteSelected, pushAction]);
+  }, [selectedObjectIds, objects, editingObject, undo, redo, handleCopySelected, handleCutSelected, handleDeleteSelected, handlePaste, selectAll, duplicateSelectedObjects, pushAction]);
 
   // Derive selected object for StylePanel (only when 1 selected)
   const selectedObject = selectedObjectIds.length === 1
@@ -499,7 +574,13 @@ export function Board() {
 
   return (
     <div className="board-container">
-      <Toolbar onLogout={handleLogout} />
+      <Toolbar
+        onLogout={handleLogout}
+        onUndo={undo}
+        onRedo={redo}
+        canUndo={canUndo}
+        canRedo={canRedo}
+      />
       <div className="board-content">
         <ShapeSidebar
           onShapeClick={createObjectAtCenter}
@@ -512,11 +593,14 @@ export function Board() {
             style={{ position: 'relative' }}
             onDragOver={handleCanvasDragOver}
             onDrop={handleCanvasDrop}
+            onContextMenu={(e) => e.preventDefault()}
           >
             <Canvas
               objects={objects}
               onObjectUpdate={handleObjectUpdate}
               onCanvasClick={handleCanvasClick}
+              onCanvasRightClick={handleCanvasRightClick}
+              onLastClickPosition={handleLastClickPosition}
               onObjectDoubleClick={handleObjectDoubleClick}
               onObjectRightClick={handleObjectRightClick}
               remoteCursors={cursors}
@@ -548,23 +632,50 @@ export function Board() {
             >
               Clear
             </button>
-        {contextMenu && contextMenuObject && (
+        {contextMenu && (
           <ContextMenu
             x={contextMenu.x}
             y={contextMenu.y}
-            objectType={contextMenuObject.type}
+            objectType={contextMenuObject?.type}
             onEditText={
-              contextMenuObject.type === 'sticky'
+              contextMenuObject?.type === 'sticky' && contextMenuObject
                 ? () => {
                     openTextEditorForObject(contextMenuObject);
                     setContextMenu(null);
                   }
                 : undefined
             }
+            onCopy={() => {
+              handleCopySelected();
+              setContextMenu(null);
+            }}
+            onCut={() => {
+              handleCutSelected();
+              setContextMenu(null);
+            }}
+            onPaste={() => {
+              handlePaste(contextMenu ? { x: contextMenu.pasteWorldX, y: contextMenu.pasteWorldY } : undefined);
+              setContextMenu(null);
+            }}
             onDuplicate={() => {
               duplicateSelectedObjects();
               setContextMenu(null);
             }}
+            onSelectAll={() => {
+              selectAll();
+              setContextMenu(null);
+            }}
+            onUndo={() => {
+              undo();
+              setContextMenu(null);
+            }}
+            onRedo={() => {
+              redo();
+              setContextMenu(null);
+            }}
+            canUndo={canUndo}
+            canRedo={canRedo}
+            hasClipboardContent={clipboardCount > 0}
             onDelete={() => {
               handleDeleteSelected();
               setContextMenu(null);

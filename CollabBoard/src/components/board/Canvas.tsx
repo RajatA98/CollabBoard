@@ -14,6 +14,8 @@ interface CanvasProps {
   objects: BoardObject[];
   onObjectUpdate: (id: string, updates: Partial<BoardObject>) => void;
   onCanvasClick: () => void;
+  onCanvasRightClick?: (screenPos: { x: number; y: number }) => void;
+  onLastClickPosition?: (worldPos: { x: number; y: number }) => void;
   onObjectDoubleClick?: (obj: BoardObject) => void;
   onObjectRightClick?: (obj: BoardObject, screenPos: { x: number; y: number }) => void;
   remoteCursors?: Record<string, CursorData>;
@@ -50,6 +52,8 @@ export function Canvas({
   objects,
   onObjectUpdate,
   onCanvasClick,
+  onCanvasRightClick,
+  onLastClickPosition,
   onObjectDoubleClick,
   onObjectRightClick,
   remoteCursors = {},
@@ -122,8 +126,9 @@ export function Canvas({
   // Group drag refs
   const dragStartPositionsRef = useRef<Map<string, { x: number; y: number }> | null>(null);
 
-  // Middle-mouse panning state
+  // Middle-mouse panning state (manual pan so it works even when draggable is toggled after mousedown)
   const [isMiddleMouseDown, setIsMiddleMouseDown] = useState(false);
+  const middleMousePanStartRef = useRef<{ pointerX: number; pointerY: number; viewportX: number; viewportY: number } | null>(null);
 
   // Marquee selection state
   const [isMarqueeSelecting, setIsMarqueeSelecting] = useState(false);
@@ -137,6 +142,37 @@ export function Canvas({
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  // Middle-mouse pan: track move/up on window so pan continues if cursor leaves canvas
+  useEffect(() => {
+    if (!isMiddleMouseDown) return;
+
+    const prevCursor = document.body.style.cursor;
+    document.body.style.cursor = 'grabbing';
+
+    const onWindowMouseMove = (e: MouseEvent) => {
+      const start = middleMousePanStartRef.current;
+      if (!start) return;
+      const dx = e.clientX - start.pointerX;
+      const dy = e.clientY - start.pointerY;
+      setPosition(start.viewportX + dx, start.viewportY + dy);
+    };
+
+    const onWindowMouseUp = (e: MouseEvent) => {
+      if (e.button === 1) {
+        middleMousePanStartRef.current = null;
+        setIsMiddleMouseDown(false);
+      }
+    };
+
+    window.addEventListener('mousemove', onWindowMouseMove);
+    window.addEventListener('mouseup', onWindowMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onWindowMouseMove);
+      window.removeEventListener('mouseup', onWindowMouseUp);
+      document.body.style.cursor = prevCursor;
+    };
+  }, [isMiddleMouseDown, setPosition]);
 
   const handleWheel = useCallback(
     (e: Konva.KonvaEventObject<WheelEvent>) => {
@@ -167,23 +203,19 @@ export function Canvas({
     };
   }, [viewport]);
 
-  // Handle middle-mouse drag end to persist stage position
-  const handleDragEnd = useCallback(
-    (e: Konva.KonvaEventObject<DragEvent>) => {
-      if (e.target === stageRef.current) {
-        setPosition(e.target.x(), e.target.y());
-      }
-    },
-    [setPosition]
-  );
-
   // --- Marquee selection handlers ---
   const handleStageMouseDown = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
-      // Middle mouse button (button === 1) = enable panning
+      // Middle mouse button (button === 1) = start canvas pan
       if (e.evt.button === 1) {
         e.evt.preventDefault();
         setIsMiddleMouseDown(true);
+        middleMousePanStartRef.current = {
+          pointerX: e.evt.clientX,
+          pointerY: e.evt.clientY,
+          viewportX: viewport.x,
+          viewportY: viewport.y,
+        };
         return;
       }
 
@@ -341,55 +373,35 @@ export function Canvas({
 
   const handleStageClick = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
+      const stage = e.target.getStage();
+      const pos = stage?.getPointerPosition();
+      if (pos && onLastClickPosition) {
+        const worldX = (pos.x - viewport.x) / viewport.scaleX;
+        const worldY = (pos.y - viewport.y) / viewport.scaleY;
+        onLastClickPosition({ x: worldX, y: worldY });
+      }
       // Don't handle clicks if we just finished a marquee
       if (e.target === stageRef.current && !isMarqueeSelecting) {
         // Only clear if we didn't already handle via mouseUp
       }
     },
-    [isMarqueeSelecting]
+    [isMarqueeSelecting, viewport, onLastClickPosition]
   );
 
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (isEditingText) return;
-      const active = document.activeElement;
-      const isEditingInput =
-        active &&
-        (active.tagName === 'INPUT' ||
-          active.tagName === 'TEXTAREA' ||
-          active.tagName === 'SELECT' ||
-          (active as HTMLElement).isContentEditable);
-      if (isEditingInput) return;
-
-      const mod = e.metaKey || e.ctrlKey;
-
-      // Select all: Ctrl/Cmd+A
-      if (e.key === 'a' && mod) {
-        e.preventDefault();
-        onSelectAll?.();
-        return;
-      }
-
-      // Delete/Backspace: cut (delete + copy to clipboard) handled in Board
-      if ((e.key === 'Backspace' || e.key === 'Delete') && selectedObjectIds.length > 0) {
-        onDeleteSelected?.();
-        return;
-      }
-
-      // Duplicate: Ctrl/Cmd+D
-      if (e.key === 'd' && mod && selectedObjectIds.length > 0) {
-        e.preventDefault();
-        onDuplicateSelected?.();
-        return;
+  const handleStageContextMenu = useCallback(
+    (e: Konva.KonvaEventObject<PointerEvent>) => {
+      const stage = e.target.getStage();
+      const target = e.target;
+      const isStage = target === stage;
+      const isLayer = (target as Konva.Node).getClassName?.() === 'Layer';
+      if (isStage || isLayer) {
+        e.evt.preventDefault();
+        const pointer = stage?.getPointerPosition();
+        if (pointer) onCanvasRightClick?.({ x: pointer.x, y: pointer.y });
       }
     },
-    [selectedObjectIds, isEditingText, onDeleteSelected, onSelectAll, onDuplicateSelected]
+    [onCanvasRightClick]
   );
-
-  useEffect(() => {
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleKeyDown]);
 
   // Track Alt key for aspect ratio toggle
   useEffect(() => {
@@ -407,17 +419,15 @@ export function Canvas({
     };
   }, []);
 
-  // Attach transformer to selected nodes (supports multi-select)
+  // Attach transformer only for single selection; multi-select uses individual highlights
   useEffect(() => {
     const stage = stageRef.current;
     const transformer = transformerRef.current;
     if (!stage || !transformer) return;
 
-    if (selectedObjectIds.length > 0) {
-      const nodes = selectedObjectIds
-        .map(id => stage.findOne('#' + id))
-        .filter(Boolean) as Konva.Node[];
-      transformer.nodes(nodes);
+    if (selectedObjectIds.length === 1) {
+      const node = stage.findOne('#' + selectedObjectIds[0]);
+      transformer.nodes(node ? [node] : []);
     } else {
       transformer.nodes([]);
     }
@@ -491,14 +501,13 @@ export function Canvas({
       ref={stageRef}
       width={stageSize.width}
       height={stageSize.height}
-      draggable={isMiddleMouseDown}
       x={viewport.x}
       y={viewport.y}
       scaleX={viewport.scaleX}
       scaleY={viewport.scaleY}
       onWheel={handleWheel}
-      onDragEnd={handleDragEnd}
       onClick={handleStageClick}
+      onContextMenu={handleStageContextMenu}
       onMouseDown={handleStageMouseDown}
       onMouseMove={handleStageMouseMove}
       onMouseUp={handleStageMouseUp}
@@ -712,6 +721,28 @@ export function Canvas({
             )}
           </>
         )}
+
+        {/* Individual selection highlights when multiple items selected */}
+        {selectedObjectIds.length > 1 &&
+          selectedObjectIds.map((id) => {
+            const obj = objects.find((o) => o.id === id);
+            if (!obj) return null;
+            const remoteXform = remoteTransformByObjectId[obj.id];
+            const display = remoteXform
+              ? { ...obj, x: remoteXform.x, y: remoteXform.y, width: remoteXform.width, height: remoteXform.height, rotation: remoteXform.rotation }
+              : obj;
+            return (
+              <SelectionRect
+                key={id}
+                x={display.x}
+                y={display.y}
+                width={display.width}
+                height={display.height}
+                rotation={display.rotation ?? 0}
+                visible
+              />
+            );
+          })}
 
         {/* Marquee selection rectangle */}
         {marqueeRect && (
