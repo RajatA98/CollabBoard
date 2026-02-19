@@ -23,15 +23,13 @@ export function Rectangle({ object, isSelected, onSelect, onUpdate, onDoubleClic
       const pointer = stage?.getPointerPosition();
       if (pointer) onRightClick?.(pointer.x, pointer.y);
     } else {
-      onSelect(e.evt?.shiftKey ?? false);
+      onSelect(!!(e.evt?.ctrlKey || e.evt?.metaKey));
     }
   };
 
   const handleContextMenu = (e: KonvaEventObject<MouseEvent>) => {
     e.evt.preventDefault();
-    const stage = e.target.getStage();
-    const pointer = stage?.getPointerPosition();
-    if (pointer) onRightClick?.(pointer.x, pointer.y);
+    onRightClick?.(e.evt.clientX, e.evt.clientY);
   };
 
   return (
@@ -46,7 +44,7 @@ export function Rectangle({ object, isSelected, onSelect, onUpdate, onDoubleClic
       onDblClick={onDoubleClick}
       onDblTap={onDoubleClick}
       onContextMenu={handleContextMenu}
-      onDragStart={() => onDragStart?.()}
+      onDragStart={onDragStart}
       onDragMove={onDragMove}
       onDragEnd={(e) => {
         onUpdate({ x: e.target.x(), y: e.target.y() });

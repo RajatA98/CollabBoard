@@ -4,14 +4,13 @@ import type { BoardObject, LiveTransformData, LiveEditingData } from '../../type
 import type { KonvaEventObject } from 'konva/lib/Node';
 import {
   measureTextHeight,
-  STICKY_TEXT_OFFSET_Y,
-  STICKY_TEXT_PADDING_BOTTOM,
-  STICKY_MIN_HEIGHT,
-  STICKY_FONT_SIZE,
-  STICKY_FONT_FAMILY,
+  TEXT_ELEMENT_PADDING,
+  TEXT_ELEMENT_MIN_HEIGHT,
+  TEXT_ELEMENT_FONT_SIZE,
+  TEXT_ELEMENT_FONT_FAMILY,
 } from '../../utils/textMeasure';
 
-interface StickyNoteProps {
+interface TextElementProps {
   object: BoardObject;
   isSelected: boolean;
   onSelect: (additive: boolean) => void;
@@ -25,14 +24,40 @@ interface StickyNoteProps {
   remoteTransform?: LiveTransformData;
 }
 
-export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleClick, onRightClick, onDragStart, onDragMove, onDragEndExtra, remoteEditing, remoteTransform }: StickyNoteProps) {
-  const handleDoubleClick = () => {
-    console.log('Sticky note double-clicked!', object.id);
-    if (onDoubleClick) {
-      onDoubleClick();
-    } else {
-      console.error('onDoubleClick handler not provided');
+export function TextElement({
+  object,
+  isSelected,
+  onSelect,
+  onUpdate,
+  onDoubleClick,
+  onRightClick,
+  onDragStart,
+  onDragMove,
+  onDragEndExtra,
+  remoteEditing,
+  remoteTransform,
+}: TextElementProps) {
+  // Auto-expand: measure text height and update object if needed
+  useEffect(() => {
+    const displayText = remoteEditing ? remoteEditing.text : (object.text ?? '');
+    if (!displayText) return; // Don't auto-expand for empty/placeholder text
+    const textWidth = object.width - TEXT_ELEMENT_PADDING * 2;
+    const neededHeight = measureTextHeight({
+      text: displayText,
+      width: textWidth,
+      fontSize: TEXT_ELEMENT_FONT_SIZE,
+      fontFamily: TEXT_ELEMENT_FONT_FAMILY,
+    }) + TEXT_ELEMENT_PADDING * 2;
+
+    const requiredHeight = Math.max(TEXT_ELEMENT_MIN_HEIGHT, neededHeight);
+
+    if (Math.abs(requiredHeight - object.height) > 1) {
+      onUpdate({ height: requiredHeight });
     }
+  }, [object.text, object.width, object.height, remoteEditing, onUpdate]);
+
+  const handleDoubleClick = () => {
+    onDoubleClick?.();
   };
 
   const handleClick = (e: KonvaEventObject<MouseEvent>) => {
@@ -51,27 +76,11 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
     onRightClick?.(e.evt.clientX, e.evt.clientY);
   };
 
-  // Auto-expand height when text needs more space; never shrink below current size
-  useEffect(() => {
-    const displayText = remoteEditing ? remoteEditing.text : (object.text ?? '');
-    if (!displayText) return;
-    const textWidth = object.width - 16; // matches Text node width={object.width - 16}
-    const neededTextHeight = measureTextHeight({
-      text: displayText,
-      width: textWidth,
-      fontSize: STICKY_FONT_SIZE,
-      fontFamily: STICKY_FONT_FAMILY,
-    });
+  const displayText = remoteEditing
+    ? remoteEditing.text
+    : (object.text || 'Type text');
 
-    const requiredHeight = Math.max(
-      STICKY_MIN_HEIGHT,
-      STICKY_TEXT_OFFSET_Y + neededTextHeight + STICKY_TEXT_PADDING_BOTTOM
-    );
-    // Only expand when text needs more space; never shrink
-    if (requiredHeight > object.height && Math.abs(requiredHeight - object.height) > 1) {
-      onUpdate({ height: requiredHeight });
-    }
-  }, [object.text, object.width, object.height, remoteEditing, onUpdate]);
+  const hasContent = remoteEditing ? !!remoteEditing.text : !!object.text;
 
   return (
     <Group
@@ -83,49 +92,34 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
       onClick={handleClick}
       onTap={() => onSelect(false)}
       onDblClick={handleDoubleClick}
+      onDragStart={onDragStart}
       onDblTap={handleDoubleClick}
       onContextMenu={handleContextMenu}
-      onDragStart={onDragStart}
       onDragMove={onDragMove}
       onDragEnd={(e) => {
         onUpdate({ x: e.target.x(), y: e.target.y() });
         onDragEndExtra?.();
       }}
     >
-      {/* Note background */}
+      {/* Background: transparent, with dashed border when selected */}
       <Rect
         width={object.width}
         height={object.height}
-        fill={object.color || '#FFD54F'}
-        stroke={isSelected ? '#FFA726' : '#FFE082'}
-        strokeWidth={isSelected ? 3 : 1}
-        cornerRadius={2}
-        shadowColor="rgba(0,0,0,0.2)"
-        shadowBlur={8}
-        shadowOffsetX={2}
-        shadowOffsetY={4}
-        shadowOpacity={0.3}
-      />
-      {/* "Note:" label at top left */}
-      <Text
-        text="Note:"
-        x={8}
-        y={6}
-        fontSize={12}
-        fontFamily="'Segoe UI', system-ui, sans-serif"
-        fill="#666"
-        fontStyle="bold"
+        fill="transparent"
+        stroke={isSelected ? '#4285f4' : 'transparent'}
+        strokeWidth={isSelected ? 2 : 0}
+        dash={isSelected ? [6, 4] : undefined}
       />
       {/* Text content */}
       <Text
-        text={remoteEditing ? remoteEditing.text : (object.text ?? 'Click to edit')}
-        width={object.width - 16}
-        x={8}
-        y={26}
-        fontSize={16}
-        fontFamily="'Segoe Print', 'Comic Sans MS', cursive"
-        fill={remoteEditing ? '#333' : (object.text ? '#333' : '#999')}
-        fontStyle={remoteEditing ? 'normal' : (object.text ? 'normal' : 'italic')}
+        text={displayText}
+        width={object.width - TEXT_ELEMENT_PADDING * 2}
+        x={TEXT_ELEMENT_PADDING}
+        y={TEXT_ELEMENT_PADDING}
+        fontSize={TEXT_ELEMENT_FONT_SIZE}
+        fontFamily={TEXT_ELEMENT_FONT_FAMILY}
+        fill={hasContent ? '#333' : '#999'}
+        fontStyle={hasContent ? 'normal' : 'italic'}
         opacity={remoteEditing ? 0.7 : 1}
         align="left"
         verticalAlign="top"
@@ -141,7 +135,6 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
             height={object.height}
             stroke={remoteEditing.userColor}
             strokeWidth={3}
-            cornerRadius={2}
             dash={[8, 4]}
             listening={false}
           />
@@ -169,7 +162,7 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
           />
         </>
       )}
-      {/* Remote transform indicator: colored border when another user is moving/resizing */}
+      {/* Remote transform indicator */}
       {remoteTransform && !remoteEditing && (
         <>
           <Rect
@@ -179,7 +172,6 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
             height={object.height + 4}
             stroke={remoteTransform.userColor}
             strokeWidth={2}
-            cornerRadius={2}
             dash={[6, 3]}
             listening={false}
           />

@@ -8,6 +8,7 @@ const mockOnOpenBoardsChange = vi.fn();
 const mockCreateBoard = vi.fn();
 const mockJoinBoard = vi.fn();
 const mockLeaveBoard = vi.fn();
+const mockDeleteBoard = vi.fn();
 
 vi.mock('../../firebase/boardMeta', () => ({
   onMyBoardsChange: (...args: unknown[]) => mockOnMyBoardsChange(...args),
@@ -15,6 +16,7 @@ vi.mock('../../firebase/boardMeta', () => ({
   createBoard: (...args: unknown[]) => mockCreateBoard(...args),
   joinBoard: (...args: unknown[]) => mockJoinBoard(...args),
   leaveBoard: (...args: unknown[]) => mockLeaveBoard(...args),
+  deleteBoard: (...args: unknown[]) => mockDeleteBoard(...args),
 }));
 
 const testUser: AppUser = {
@@ -140,5 +142,17 @@ describe('useBoards', () => {
         await result.current.createBoard('Test');
       })
     ).rejects.toThrow('Not authenticated');
+  });
+
+  it('should call deleteBoard with boardId', async () => {
+    mockDeleteBoard.mockResolvedValue(undefined);
+
+    const { result } = renderHook(() => useBoards(testUser));
+
+    await act(async () => {
+      await result.current.deleteBoard('board-1');
+    });
+
+    expect(mockDeleteBoard).toHaveBeenCalledWith('board-1');
   });
 });

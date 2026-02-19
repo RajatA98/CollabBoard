@@ -172,6 +172,14 @@
   font-weight: 500;
 }
 
+.board-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 4px;
+}
+
 .board-card-action {
   padding: 8px 16px;
   background: #667eea;
@@ -182,12 +190,27 @@
   font-weight: 600;
   cursor: pointer;
   transition: background 0.2s;
-  align-self: flex-start;
-  margin-top: 4px;
 }
 
 .board-card-action:hover {
   background: #5a6fd6;
+}
+
+.board-card-delete {
+  padding: 8px 16px;
+  background: transparent;
+  color: #b71c1c;
+  border: 1px solid #e57373;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.board-card-delete:hover {
+  background: #ffebee;
+  border-color: #b71c1c;
 }
 
 /* Empty State */

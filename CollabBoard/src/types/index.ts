@@ -1,6 +1,6 @@
 export interface BoardObject {
   id: string;
-  type: 'sticky' | 'rectangle';
+  type: 'sticky' | 'rectangle' | 'text';
   x: number;
   y: number;
   width: number;
@@ -48,6 +48,13 @@ export interface LiveEditingData {
   text: string;
   userName: string;
   userColor: string;
+  lastActive: number;
+}
+
+export interface SelectionData {
+  objectId: string | null;
+  userName?: string;
+  userColor?: string;
   lastActive: number;
 }
 

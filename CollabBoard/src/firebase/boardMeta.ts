@@ -3,6 +3,7 @@ import {
   setDoc,
   updateDoc,
   getDoc,
+  deleteDoc,
   collection,
   query,
   where,
@@ -12,6 +13,7 @@ import {
   onSnapshot,
 } from 'firebase/firestore';
 import { db } from './config';
+import { clearObjects } from './firestore';
 import type { BoardMeta } from '../types';
 
 export async function createBoard(
@@ -71,6 +73,41 @@ export async function getBoardMeta(
   const snap = await getDoc(ref);
   if (!snap.exists()) return null;
   return { ...snap.data(), id: snap.id } as BoardMeta;
+}
+
+export async function updateBoardName(
+  boardId: string,
+  name: string
+): Promise<void> {
+  const ref = doc(db, 'boardMeta', boardId);
+  await updateDoc(ref, {
+    name: name.trim() || '',
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * Deletes a board: removes all board objects then the board meta document.
+ * Firestore rules allow delete only when request.auth.uid === resource.data.creatorId.
+ */
+export async function deleteBoard(boardId: string): Promise<void> {
+  await clearObjects(boardId);
+  const ref = doc(db, 'boardMeta', boardId);
+  await deleteDoc(ref);
+}
+
+export function onBoardMetaChange(
+  boardId: string,
+  callback: (meta: BoardMeta | null) => void
+): () => void {
+  const ref = doc(db, 'boardMeta', boardId);
+  return onSnapshot(ref, (snapshot) => {
+    if (!snapshot.exists()) {
+      callback(null);
+      return;
+    }
+    callback({ ...snapshot.data(), id: snapshot.id } as BoardMeta);
+  });
 }
 
 export function onMyBoardsChange(

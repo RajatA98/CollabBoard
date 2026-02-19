@@ -174,17 +174,18 @@ describe('cleanupUserData should include transforms and editing', () => {
     mockRef.mockReturnValue('mock-ref');
   });
 
-  it('should remove presence, cursor, transform, and editing data', async () => {
+  it('should remove presence, cursor, transform, editing, and selection data', async () => {
     const { cleanupUserData } = await import('../rtdb');
 
     await cleanupUserData('board-1', 'user-1');
 
-    // Should have been called with 4 different paths (presence, cursor, transform, editing)
+    // Should have been called with 5 different paths (presence, cursor, transform, editing, selection)
     const refCalls = mockRef.mock.calls.map((c: unknown[]) => c[1]);
     expect(refCalls).toContain('boards/board-1/presence/user-1');
     expect(refCalls).toContain('boards/board-1/cursors/user-1');
     expect(refCalls).toContain('boards/board-1/transforms/user-1');
     expect(refCalls).toContain('boards/board-1/editing/user-1');
-    expect(mockRemove).toHaveBeenCalledTimes(4);
+    expect(refCalls).toContain('boards/board-1/selection/user-1');
+    expect(mockRemove).toHaveBeenCalledTimes(5);
   });
 });

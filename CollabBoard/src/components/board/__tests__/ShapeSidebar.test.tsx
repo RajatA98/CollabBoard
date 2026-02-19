@@ -10,37 +10,49 @@ describe('ShapeSidebar', () => {
     expect(sidebar).toBeInTheDocument();
   });
 
-  it('should render sticky note first, then Shapes dropdown trigger', () => {
+  it('should render three left-bar buttons: sticky, text, shapes', () => {
     render(<ShapeSidebar />);
 
-    const stickyTemplate = screen.getByTestId('shape-template-sticky');
-    const dropdownTrigger = screen.getByTestId('shape-dropdown-trigger');
-
-    expect(stickyTemplate).toBeInTheDocument();
-    expect(dropdownTrigger).toBeInTheDocument();
-    expect(stickyTemplate.compareDocumentPosition(dropdownTrigger)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING
-    );
+    expect(screen.getByTestId('shape-template-sticky')).toBeInTheDocument();
+    expect(screen.getByTestId('shape-template-text')).toBeInTheDocument();
+    expect(screen.getByTestId('shape-bar-shapes-btn')).toBeInTheDocument();
   });
 
-  it('should render Shapes dropdown trigger with label', () => {
+  it('should render sticky first, then text, then shapes button', () => {
     render(<ShapeSidebar />);
 
-    expect(screen.getByRole('button', { name: /shapes/i })).toBeInTheDocument();
+    const sticky = screen.getByTestId('shape-template-sticky');
+    const text = screen.getByTestId('shape-template-text');
+    const shapes = screen.getByTestId('shape-bar-shapes-btn');
+
+    expect(sticky.compareDocumentPosition(text)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(text.compareDocumentPosition(shapes)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
-  it('should show rectangle only when Shapes dropdown is expanded', () => {
+  it('should show rectangle only when Shapes panel is open', () => {
     render(<ShapeSidebar />);
 
     expect(screen.queryByTestId('shape-template-rectangle')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('shape-panel')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId('shape-dropdown-trigger'));
+    fireEvent.click(screen.getByTestId('shape-bar-shapes-btn'));
 
-    expect(screen.getByTestId('shape-dropdown-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('shape-panel')).toBeInTheDocument();
     expect(screen.getByTestId('shape-template-rectangle')).toBeInTheDocument();
   });
 
-  it('should render sticky note shape template (always visible)', () => {
+  it('should not show text template in shapes panel (text is a separate button)', () => {
+    render(<ShapeSidebar />);
+
+    fireEvent.click(screen.getByTestId('shape-bar-shapes-btn'));
+
+    expect(screen.getByTestId('shape-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('shape-template-rectangle')).toBeInTheDocument();
+    expect(screen.queryByTestId('shape-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('shape-template-text').closest('.shape-panel')).toBeNull();
+  });
+
+  it('should render sticky note with aria-label', () => {
     render(<ShapeSidebar />);
 
     const stickyTemplate = screen.getByTestId('shape-template-sticky');
@@ -48,34 +60,21 @@ describe('ShapeSidebar', () => {
     expect(stickyTemplate).toHaveAttribute('aria-label', 'Sticky note');
   });
 
-  it('should show rectangle icon only (no Rectangle text in dropdown)', () => {
-    render(<ShapeSidebar />);
-    fireEvent.click(screen.getByTestId('shape-dropdown-trigger'));
-
-    expect(screen.getByTestId('shape-template-rectangle')).toBeInTheDocument();
-    expect(screen.queryByText(/^rectangle$/i)).not.toBeInTheDocument();
-  });
-
-  it('should have draggable attribute on shape templates', () => {
+  it('should have draggable attribute on sticky and text', () => {
     render(<ShapeSidebar />);
 
     const stickyTemplate = screen.getByTestId('shape-template-sticky');
+    const textTemplate = screen.getByTestId('shape-template-text');
     expect(stickyTemplate).toHaveAttribute('draggable', 'true');
+    expect(textTemplate).toHaveAttribute('draggable', 'true');
+  });
 
-    fireEvent.click(screen.getByTestId('shape-dropdown-trigger'));
+  it('should have draggable on rectangle when panel is open', () => {
+    render(<ShapeSidebar />);
+    fireEvent.click(screen.getByTestId('shape-bar-shapes-btn'));
+
     const rectangleTemplate = screen.getByTestId('shape-template-rectangle');
     expect(rectangleTemplate).toHaveAttribute('draggable', 'true');
-  });
-
-  it('should call onDragStart when dragging starts', () => {
-    render(<ShapeSidebar />);
-
-    const stickyTemplate = screen.getByTestId('shape-template-sticky');
-    const dragStartEvent = new Event('dragstart', { bubbles: true });
-
-    fireEvent(stickyTemplate, dragStartEvent);
-
-    expect(stickyTemplate).toBeInTheDocument();
   });
 
   it('should store shape type in data attribute', () => {
@@ -84,7 +83,10 @@ describe('ShapeSidebar', () => {
     const stickyTemplate = screen.getByTestId('shape-template-sticky');
     expect(stickyTemplate).toHaveAttribute('data-shape-type', 'sticky');
 
-    fireEvent.click(screen.getByTestId('shape-dropdown-trigger'));
+    const textTemplate = screen.getByTestId('shape-template-text');
+    expect(textTemplate).toHaveAttribute('data-shape-type', 'text');
+
+    fireEvent.click(screen.getByTestId('shape-bar-shapes-btn'));
     const rectangleTemplate = screen.getByTestId('shape-template-rectangle');
     expect(rectangleTemplate).toHaveAttribute('data-shape-type', 'rectangle');
   });
@@ -95,12 +97,11 @@ describe('ShapeSidebar', () => {
     const sidebar = screen.getByTestId('shape-sidebar');
     expect(sidebar).toHaveClass('shape-sidebar');
 
-    const stickyTemplate = screen.getByTestId('shape-template-sticky');
-    expect(stickyTemplate).toHaveClass('shape-template');
-
-    fireEvent.click(screen.getByTestId('shape-dropdown-trigger'));
+    fireEvent.click(screen.getByTestId('shape-bar-shapes-btn'));
+    const panel = screen.getByTestId('shape-panel');
     const rectangleTemplate = screen.getByTestId('shape-template-rectangle');
-    expect(rectangleTemplate).toHaveClass('shape-template');
+    expect(panel).toHaveClass('shape-panel');
+    expect(rectangleTemplate).toHaveClass('shape-panel-item');
   });
 
   it('should call onShapeClick when sticky is clicked', () => {
@@ -112,28 +113,46 @@ describe('ShapeSidebar', () => {
     expect(onShapeClick).toHaveBeenCalledWith('sticky');
   });
 
-  it('should call onShapeClick when rectangle is clicked (after opening dropdown)', () => {
+  it('should call onShapeClick when text button is clicked', () => {
     const onShapeClick = vi.fn();
     render(<ShapeSidebar onShapeClick={onShapeClick} />);
 
-    fireEvent.click(screen.getByTestId('shape-dropdown-trigger'));
+    const textTemplate = screen.getByTestId('shape-template-text');
+    fireEvent.click(textTemplate);
+    expect(onShapeClick).toHaveBeenCalledWith('text');
+  });
+
+  it('should call onShapeClick when rectangle in panel is clicked', () => {
+    const onShapeClick = vi.fn();
+    render(<ShapeSidebar onShapeClick={onShapeClick} />);
+
+    fireEvent.click(screen.getByTestId('shape-bar-shapes-btn'));
     const rectangleTemplate = screen.getByTestId('shape-template-rectangle');
     fireEvent.click(rectangleTemplate);
     expect(onShapeClick).toHaveBeenCalledWith('rectangle');
   });
 
-  it('should toggle dropdown when trigger is clicked', () => {
+  it('should toggle shapes panel when Shapes button is clicked', () => {
     render(<ShapeSidebar />);
 
-    const trigger = screen.getByTestId('shape-dropdown-trigger');
-    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    const shapesBtn = screen.getByTestId('shape-bar-shapes-btn');
+    expect(screen.queryByTestId('shape-panel')).not.toBeInTheDocument();
 
-    fireEvent.click(trigger);
-    expect(trigger).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByTestId('shape-dropdown-panel')).toBeInTheDocument();
+    fireEvent.click(shapesBtn);
+    expect(screen.getByTestId('shape-panel')).toBeInTheDocument();
 
-    fireEvent.click(trigger);
-    expect(trigger).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByTestId('shape-dropdown-panel')).not.toBeInTheDocument();
+    fireEvent.click(shapesBtn);
+    expect(screen.queryByTestId('shape-panel')).not.toBeInTheDocument();
+  });
+
+  it('should call onDragStart when dragging starts from sticky', () => {
+    render(<ShapeSidebar />);
+
+    const stickyTemplate = screen.getByTestId('shape-template-sticky');
+    const dragStartEvent = new Event('dragstart', { bubbles: true });
+
+    fireEvent(stickyTemplate, dragStartEvent);
+
+    expect(stickyTemplate).toBeInTheDocument();
   });
 });

@@ -1,9 +1,10 @@
-import { useRef, useCallback, useEffect, useState, useMemo } from 'react';
+import React, { useRef, useCallback, useEffect, useState, useMemo } from 'react';
 import { Stage, Layer, Transformer } from 'react-konva';
 import type Konva from 'konva';
 import { GridBackground } from './GridBackground';
 import { StickyNote } from './StickyNote';
 import { Rectangle } from './Rectangle';
+import { TextElement } from './TextElement';
 import { RemoteCursor } from './RemoteCursor';
 import { DimensionLabel } from './DimensionLabel';
 import { SelectionRect } from './SelectionRect';
@@ -13,6 +14,8 @@ import type { BoardObject, CursorData, LiveTransformData, LiveEditingData } from
 interface CanvasProps {
   objects: BoardObject[];
   onObjectUpdate: (id: string, updates: Partial<BoardObject>) => void;
+  onBatchObjectUpdate?: (changes: { id: string; updates: Partial<BoardObject> }[]) => void;
+  onObjectDelete?: (id: string) => void;
   onCanvasClick: () => void;
   onCanvasRightClick?: (screenPos: { x: number; y: number }) => void;
   onLastClickPosition?: (worldPos: { x: number; y: number }) => void;
@@ -42,6 +45,8 @@ interface CanvasProps {
   remoteEditings?: Record<string, LiveEditingData>;
   onBroadcastTransform?: (objectId: string, x: number, y: number, width: number, height: number, rotation: number) => void;
   onClearTransform?: () => void;
+  /** When true, stage panning is disabled so HTML5 drop from sidebar is not stolen. */
+  isDraggingShapeFromSidebar?: boolean;
 }
 
 const ZOOM_SPEED = 1.05;
@@ -51,6 +56,8 @@ const MIN_OBJECT_SIZE = 60;
 export function Canvas({
   objects,
   onObjectUpdate,
+  onBatchObjectUpdate,
+  onObjectDelete: _onObjectDelete,
   onCanvasClick,
   onCanvasRightClick,
   onLastClickPosition,
@@ -62,8 +69,8 @@ export function Canvas({
   onSelectObject,
   onClearSelection,
   onSelectAll: _onSelectAll,
-  onDeleteSelected: _onDeleteSelected,
-  onDuplicateSelected: _onDuplicateSelected,
+  onDeleteSelected,
+  onDuplicateSelected,
   onSetSelectedIds,
   viewport,
   setPosition,
@@ -74,6 +81,7 @@ export function Canvas({
   remoteEditings = {},
   onBroadcastTransform,
   onClearTransform,
+  isDraggingShapeFromSidebar = false,
 }: CanvasProps) {
   const stageRef = useRef<Konva.Stage>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
@@ -91,8 +99,27 @@ export function Canvas({
   } | null>(null);
   const liveTransformRef = useRef<typeof liveTransform>(null);
   const isTransformingRef = useRef(false);
+  const transformFlushScheduledRef = useRef(false);
+  const transformingObjectIdRef = useRef<string | null>(null);
   const [dimensionLabelTick, setDimensionLabelTick] = useState(0);
   const dimensionLabelRafRef = useRef<number | null>(null);
+  const dragStartPositionsRef = useRef<Map<string, { x: number; y: number }> | null>(null);
+  const [isMiddleMouseDown, setIsMiddleMouseDown] = useState(false);
+  const middleMousePanStartRef = useRef<{ pointerX: number; pointerY: number; viewportX: number; viewportY: number } | null>(null);
+  const [isMarqueeSelecting, setIsMarqueeSelecting] = useState(false);
+  const [marqueeStart, setMarqueeStart] = useState<{ x: number; y: number } | null>(null);
+  const [marqueeEnd, setMarqueeEnd] = useState<{ x: number; y: number } | null>(null);
+
+  const getWorldPointer = useCallback(() => {
+    const stage = stageRef.current;
+    if (!stage) return null;
+    const pointer = stage.getPointerPosition();
+    if (!pointer) return null;
+    return {
+      x: (pointer.x - viewport.x) / viewport.scaleX,
+      y: (pointer.y - viewport.y) / viewport.scaleY,
+    };
+  }, [viewport]);
 
   // One rAF-driven re-render per frame during transform so DimensionLabel reads liveTransformRef without delay
   const startDimensionLabelRafLoop = useCallback(() => {
@@ -123,18 +150,6 @@ export function Canvas({
     return map;
   }, [remoteEditings]);
 
-  // Group drag refs
-  const dragStartPositionsRef = useRef<Map<string, { x: number; y: number }> | null>(null);
-
-  // Middle-mouse panning state (manual pan so it works even when draggable is toggled after mousedown)
-  const [isMiddleMouseDown, setIsMiddleMouseDown] = useState(false);
-  const middleMousePanStartRef = useRef<{ pointerX: number; pointerY: number; viewportX: number; viewportY: number } | null>(null);
-
-  // Marquee selection state
-  const [isMarqueeSelecting, setIsMarqueeSelecting] = useState(false);
-  const [marqueeStart, setMarqueeStart] = useState<{ x: number; y: number } | null>(null);
-  const [marqueeEnd, setMarqueeEnd] = useState<{ x: number; y: number } | null>(null);
-
   useEffect(() => {
     const handleResize = () => {
       setStageSize({ width: window.innerWidth, height: window.innerHeight - 48 });
@@ -143,13 +158,10 @@ export function Canvas({
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Middle-mouse pan: track move/up on window so pan continues if cursor leaves canvas
   useEffect(() => {
     if (!isMiddleMouseDown) return;
-
     const prevCursor = document.body.style.cursor;
     document.body.style.cursor = 'grabbing';
-
     const onWindowMouseMove = (e: MouseEvent) => {
       const start = middleMousePanStartRef.current;
       if (!start) return;
@@ -157,14 +169,12 @@ export function Canvas({
       const dy = e.clientY - start.pointerY;
       setPosition(start.viewportX + dx, start.viewportY + dy);
     };
-
     const onWindowMouseUp = (e: MouseEvent) => {
       if (e.button === 1) {
         middleMousePanStartRef.current = null;
         setIsMiddleMouseDown(false);
       }
     };
-
     window.addEventListener('mousemove', onWindowMouseMove);
     window.addEventListener('mouseup', onWindowMouseUp);
     return () => {
@@ -174,39 +184,8 @@ export function Canvas({
     };
   }, [isMiddleMouseDown, setPosition]);
 
-  const handleWheel = useCallback(
-    (e: Konva.KonvaEventObject<WheelEvent>) => {
-      e.evt.preventDefault();
-      const stage = stageRef.current;
-      if (!stage) return;
-
-      const oldScale = viewport.scaleX;
-      const pointer = stage.getPointerPosition();
-      if (!pointer) return;
-
-      const direction = e.evt.deltaY > 0 ? -1 : 1;
-      const newScale = direction > 0 ? oldScale * ZOOM_SPEED : oldScale / ZOOM_SPEED;
-      zoomAtPoint(newScale, pointer.x, pointer.y);
-    },
-    [viewport.scaleX, zoomAtPoint]
-  );
-
-  // Get world coordinates from screen pointer position
-  const getWorldPointer = useCallback(() => {
-    const stage = stageRef.current;
-    if (!stage) return null;
-    const pointer = stage.getPointerPosition();
-    if (!pointer) return null;
-    return {
-      x: (pointer.x - viewport.x) / viewport.scaleX,
-      y: (pointer.y - viewport.y) / viewport.scaleY,
-    };
-  }, [viewport]);
-
-  // --- Marquee selection handlers ---
   const handleStageMouseDown = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
-      // Middle mouse button (button === 1) = start canvas pan
       if (e.evt.button === 1) {
         e.evt.preventDefault();
         setIsMiddleMouseDown(true);
@@ -218,37 +197,26 @@ export function Canvas({
         };
         return;
       }
-
-      // Only start marquee on left-click on the stage itself (not on objects)
       if (e.target !== stageRef.current) return;
       if (e.evt.button !== 0) return;
-
       const worldPos = getWorldPointer();
       if (!worldPos) return;
-
       setIsMarqueeSelecting(true);
       setMarqueeStart(worldPos);
       setMarqueeEnd(worldPos);
     },
-    [getWorldPointer]
+    [getWorldPointer, viewport]
   );
 
   const handleStageMouseMove = useCallback(
     (_e: Konva.KonvaEventObject<MouseEvent>) => {
-      // Track cursor for remote cursors
       if (onMouseMove) {
         const worldPos = getWorldPointer();
-        if (worldPos) {
-          onMouseMove(worldPos.x, worldPos.y);
-        }
+        if (worldPos) onMouseMove(worldPos.x, worldPos.y);
       }
-
-      // Update marquee
       if (isMarqueeSelecting) {
         const worldPos = getWorldPointer();
-        if (worldPos) {
-          setMarqueeEnd(worldPos);
-        }
+        if (worldPos) setMarqueeEnd(worldPos);
       }
     },
     [onMouseMove, getWorldPointer, isMarqueeSelecting]
@@ -256,37 +224,31 @@ export function Canvas({
 
   const handleStageMouseUp = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
-      // Release middle-mouse panning
       if (e.evt.button === 1) {
         setIsMiddleMouseDown(false);
         return;
       }
-
       if (!isMarqueeSelecting || !marqueeStart || !marqueeEnd) return;
-
       const minX = Math.min(marqueeStart.x, marqueeEnd.x);
       const minY = Math.min(marqueeStart.y, marqueeEnd.y);
       const width = Math.abs(marqueeEnd.x - marqueeStart.x);
       const height = Math.abs(marqueeEnd.y - marqueeStart.y);
-
-      // Only select if the marquee has some area (not just a click)
       if (width > 5 || height > 5) {
         const marqueeRect = { x: minX, y: minY, width, height };
         const hitIds = objects
-          .filter(obj => rectsIntersect(marqueeRect, { x: obj.x, y: obj.y, width: obj.width, height: obj.height }))
-          .map(obj => obj.id);
-
+          .filter((obj) =>
+            rectsIntersect(marqueeRect, { x: obj.x, y: obj.y, width: obj.width, height: obj.height })
+          )
+          .map((obj) => obj.id);
         if (hitIds.length > 0) {
           onSetSelectedIds?.(hitIds);
         } else {
           onClearSelection();
         }
       } else {
-        // Tiny drag = treat as a click on empty canvas
         onClearSelection();
         onCanvasClick();
       }
-
       setIsMarqueeSelecting(false);
       setMarqueeStart(null);
       setMarqueeEnd(null);
@@ -294,18 +256,15 @@ export function Canvas({
     [isMarqueeSelecting, marqueeStart, marqueeEnd, objects, onSetSelectedIds, onClearSelection, onCanvasClick]
   );
 
-  // --- Group drag handlers ---
   const handleObjectDragStart = useCallback(
     (draggedId: string) => {
       if (selectedObjectIds.includes(draggedId) && selectedObjectIds.length > 1) {
         const stage = stageRef.current;
         if (!stage) return;
         const positions = new Map<string, { x: number; y: number }>();
-        selectedObjectIds.forEach(id => {
+        selectedObjectIds.forEach((id) => {
           const node = stage.findOne('#' + id);
-          if (node) {
-            positions.set(id, { x: node.x(), y: node.y() });
-          }
+          if (node) positions.set(id, { x: node.x(), y: node.y() });
         });
         dragStartPositionsRef.current = positions;
       } else {
@@ -319,17 +278,13 @@ export function Canvas({
     (draggedId: string, newX: number, newY: number) => {
       const positions = dragStartPositionsRef.current;
       if (!positions || selectedObjectIds.length <= 1) return;
-
       const startPos = positions.get(draggedId);
       if (!startPos) return;
-
       const dx = newX - startPos.x;
       const dy = newY - startPos.y;
-
       const stage = stageRef.current;
       if (!stage) return;
-
-      selectedObjectIds.forEach(id => {
+      selectedObjectIds.forEach((id) => {
         if (id === draggedId) return;
         const pos = positions.get(id);
         if (!pos) return;
@@ -348,27 +303,48 @@ export function Canvas({
     (draggedId: string, finalX: number, finalY: number) => {
       const positions = dragStartPositionsRef.current;
       if (!positions || selectedObjectIds.length <= 1) {
-        // Single object drag — just persist normally
         onObjectUpdate(draggedId, { x: finalX, y: finalY });
         return;
       }
-
       const startPos = positions.get(draggedId);
       if (!startPos) return;
       const dx = finalX - startPos.x;
       const dy = finalY - startPos.y;
-
-      // Persist all selected object positions
-      selectedObjectIds.forEach(id => {
-        const pos = positions.get(id);
-        if (pos) {
-          onObjectUpdate(id, { x: pos.x + dx, y: pos.y + dy });
-        }
-      });
-
+      if (onBatchObjectUpdate) {
+        const changes = selectedObjectIds
+          .map((id) => {
+            const pos = positions.get(id);
+            return pos ? { id, updates: { x: pos.x + dx, y: pos.y + dy } as Partial<BoardObject> } : null;
+          })
+          .filter((c): c is { id: string; updates: Partial<BoardObject> } => c !== null);
+        if (changes.length > 0) onBatchObjectUpdate(changes);
+      } else {
+        selectedObjectIds.forEach((id) => {
+          const pos = positions.get(id);
+          if (pos) onObjectUpdate(id, { x: pos.x + dx, y: pos.y + dy });
+        });
+      }
       dragStartPositionsRef.current = null;
     },
-    [selectedObjectIds, onObjectUpdate]
+    [selectedObjectIds, onObjectUpdate, onBatchObjectUpdate]
+  );
+
+  const handleWheel = useCallback(
+    (e: Konva.KonvaEventObject<WheelEvent>) => {
+      e.evt.preventDefault();
+      if (isDraggingShapeFromSidebar) return;
+      const stage = stageRef.current;
+      if (!stage || viewport == null) return;
+
+      const oldScale = viewport.scaleX;
+      const pointer = stage.getPointerPosition();
+      if (!pointer) return;
+
+      const direction = e.evt.deltaY > 0 ? -1 : 1;
+      const newScale = direction > 0 ? oldScale * ZOOM_SPEED : oldScale / ZOOM_SPEED;
+      zoomAtPoint(newScale, pointer.x, pointer.y);
+    },
+    [viewport, zoomAtPoint, isDraggingShapeFromSidebar]
   );
 
   const handleStageClick = useCallback(
@@ -380,12 +356,8 @@ export function Canvas({
         const worldY = (pos.y - viewport.y) / viewport.scaleY;
         onLastClickPosition({ x: worldX, y: worldY });
       }
-      // Don't handle clicks if we just finished a marquee
-      if (e.target === stageRef.current && !isMarqueeSelecting) {
-        // Only clear if we didn't already handle via mouseUp
-      }
     },
-    [isMarqueeSelecting, viewport, onLastClickPosition]
+    [viewport, onLastClickPosition]
   );
 
   const handleStageContextMenu = useCallback(
@@ -403,6 +375,35 @@ export function Canvas({
     [onCanvasRightClick]
   );
 
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (_isEditingText) return;
+      const active = document.activeElement;
+      const isEditingInput =
+        active &&
+        (active.tagName === 'INPUT' ||
+          active.tagName === 'TEXTAREA' ||
+          active.tagName === 'SELECT' ||
+          (active as HTMLElement).isContentEditable);
+      if (isEditingInput) return;
+
+      if ((e.key === 'Backspace' || e.key === 'Delete') && selectedObjectIds.length > 0) {
+        e.preventDefault();
+        onDeleteSelected?.();
+      }
+      if (e.key === 'd' && (e.metaKey || e.ctrlKey) && selectedObjectIds.length > 0) {
+        e.preventDefault();
+        onDuplicateSelected?.();
+      }
+    },
+    [selectedObjectIds.length, _isEditingText, onDeleteSelected, onDuplicateSelected]
+  );
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
+
   // Track Alt key for aspect ratio toggle
   useEffect(() => {
     const handleAltKeyDown = (e: KeyboardEvent) => {
@@ -419,74 +420,35 @@ export function Canvas({
     };
   }, []);
 
-  // Attach transformer only for single selection; multi-select uses individual highlights
+  // Attach transformer to selected node(s): one or many (multi-select)
   useEffect(() => {
     const stage = stageRef.current;
     const transformer = transformerRef.current;
     if (!stage || !transformer) return;
-
-    if (selectedObjectIds.length === 1) {
-      const node = stage.findOne('#' + selectedObjectIds[0]);
-      transformer.nodes(node ? [node] : []);
-    } else {
+    if (selectedObjectIds.length === 0) {
       transformer.nodes([]);
+    } else {
+      const nodes = selectedObjectIds
+        .map((id) => stage.findOne('#' + id))
+        .filter((n): n is Konva.Node => n != null);
+      transformer.nodes(nodes);
     }
     transformer.getLayer()?.batchDraw();
   }, [selectedObjectIds]);
 
-  // Helper to render an object component
-  const renderObject = (obj: BoardObject, isSelected: boolean, displayObject?: BoardObject) => {
-    const objToRender = displayObject || obj;
-    const remoteXform = remoteTransformByObjectId[obj.id];
-    const remoteEdit = remoteEditingByObjectId[obj.id];
+  // Helper to create onDragMove handler for broadcasting
+  const makeDragMoveHandler = useCallback(
+    (obj: BoardObject) => (e: Konva.KonvaEventObject<DragEvent>) => {
+      const node = e.target;
+      handleObjectDragMove(obj.id, node.x(), node.y());
+      onBroadcastTransform?.(obj.id, node.x(), node.y(), obj.width, obj.height, obj.rotation || 0);
+    },
+    [onBroadcastTransform, handleObjectDragMove]
+  );
 
-    const commonProps = {
-      key: obj.id,
-      object: objToRender,
-      isSelected,
-      onSelect: (additive: boolean) => onSelectObject(obj.id, additive),
-      onDoubleClick: () => onObjectDoubleClick?.(obj),
-      onRightClick: (screenX: number, screenY: number) => onObjectRightClick?.(obj, { x: screenX, y: screenY }),
-      onDragStart: () => handleObjectDragStart(obj.id),
-      onDragMove: (e: Konva.KonvaEventObject<DragEvent>) => {
-        // Group drag coordination
-        handleObjectDragMove(obj.id, e.target.x(), e.target.y());
-        // Broadcast to remote users
-        onBroadcastTransform?.(obj.id, e.target.x(), e.target.y(), obj.width, obj.height, obj.rotation || 0);
-      },
-      onDragEndExtra: () => {
-        onClearTransform?.();
-      },
-      remoteTransform: remoteXform,
-    };
-
-    if (obj.type === 'sticky') {
-      return <StickyNote {...commonProps}
-        remoteEditing={remoteEdit}
-        onUpdate={(updates) => {
-          if (updates.x !== undefined && updates.y !== undefined && isSelected && selectedObjectIds.length > 1) {
-            handleObjectDragEnd(obj.id, updates.x, updates.y);
-          } else {
-            onObjectUpdate(obj.id, updates);
-          }
-        }}
-      />;
-    }
-    return <Rectangle {...commonProps}
-      onUpdate={(updates) => {
-        if (updates.x !== undefined && updates.y !== undefined && isSelected && selectedObjectIds.length > 1) {
-          handleObjectDragEnd(obj.id, updates.x, updates.y);
-        } else {
-          onObjectUpdate(obj.id, updates);
-        }
-      }}
-    />;
-  };
-
-  // Get the single selected object for DimensionLabel (only when 1 selected)
-  const singleSelectedObj = selectedObjectIds.length === 1
-    ? objects.find(o => o.id === selectedObjectIds[0])
-    : undefined;
+  const handleDragEndExtra = useCallback(() => {
+    onClearTransform?.();
+  }, [onClearTransform]);
 
   // Compute marquee rect in world coordinates for rendering
   const marqueeRect = marqueeStart && marqueeEnd ? {
@@ -496,7 +458,23 @@ export function Canvas({
     height: Math.abs(marqueeEnd.y - marqueeStart.y),
   } : null;
 
+  // Bounding box for multi-select: dashed box around all selected shapes
+  const multiSelectBounds = useMemo(() => {
+    if (selectedObjectIds.length <= 1) return null;
+    const selected = objects.filter((o) => selectedObjectIds.includes(o.id));
+    if (selected.length === 0) return null;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    selected.forEach((obj) => {
+      minX = Math.min(minX, obj.x);
+      minY = Math.min(minY, obj.y);
+      maxX = Math.max(maxX, obj.x + obj.width);
+      maxY = Math.max(maxY, obj.y + obj.height);
+    });
+    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+  }, [objects, selectedObjectIds]);
+
   return (
+    <div style={{ width: '100%', height: '100%', pointerEvents: isDraggingShapeFromSidebar ? 'none' : 'auto' }}>
     <Stage
       ref={stageRef}
       width={stageSize.width}
@@ -516,103 +494,234 @@ export function Canvas({
         <GridBackground viewport={viewport} stageSize={stageSize} />
       </Layer>
       <Layer>
-        {/* Render non-selected objects first */}
+        {marqueeRect && isMarqueeSelecting && (
+          <SelectionRect
+            x={marqueeRect.x}
+            y={marqueeRect.y}
+            width={marqueeRect.width}
+            height={marqueeRect.height}
+            visible
+          />
+        )}
+        {/* Render non-selected objects first so selected objects + Transformer draw on top */}
         {objects
-          .filter(obj => !selectedObjectIds.includes(obj.id))
-          .map(obj => {
-            // Apply remote live transform if another user is manipulating this object
+          .filter((obj) => !selectedObjectIds.includes(obj.id))
+          .map((obj) => {
             const remoteXform = remoteTransformByObjectId[obj.id];
+            const remoteEdit = remoteEditingByObjectId[obj.id];
             const displayObj = remoteXform
               ? { ...obj, x: remoteXform.x, y: remoteXform.y, width: remoteXform.width, height: remoteXform.height, rotation: remoteXform.rotation }
               : obj;
-            return renderObject(obj, false, displayObj);
+            if (obj.type === 'sticky') {
+              return (
+                <StickyNote
+                  key={obj.id}
+                  object={displayObj}
+                  isSelected={false}
+                  onSelect={(additive) => onSelectObject(obj.id, additive)}
+                  onDragStart={() => handleObjectDragStart(obj.id)}
+                  onUpdate={(updates) => onObjectUpdate(obj.id, updates)}
+                  onDoubleClick={() => onObjectDoubleClick?.(obj)}
+                  onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
+                  onDragMove={makeDragMoveHandler(obj)}
+                  onDragEndExtra={handleDragEndExtra}
+                  remoteEditing={remoteEdit}
+                  remoteTransform={remoteXform}
+                />
+              );
+            } else if (obj.type === 'text') {
+              return (
+                <TextElement
+                  key={obj.id}
+                  object={displayObj}
+                  isSelected={false}
+                  onSelect={(additive) => onSelectObject(obj.id, additive)}
+                  onDragStart={() => handleObjectDragStart(obj.id)}
+                  onUpdate={(updates) => onObjectUpdate(obj.id, updates)}
+                  onDoubleClick={() => onObjectDoubleClick?.(obj)}
+                  onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
+                  onDragMove={makeDragMoveHandler(obj)}
+                  onDragEndExtra={handleDragEndExtra}
+                  remoteEditing={remoteEdit}
+                  remoteTransform={remoteXform}
+                />
+              );
+            } else {
+              return (
+                <Rectangle
+                  key={obj.id}
+                  object={displayObj}
+                  isSelected={false}
+                  onSelect={(additive) => onSelectObject(obj.id, additive)}
+                  onDragStart={() => handleObjectDragStart(obj.id)}
+                  onUpdate={(updates) => onObjectUpdate(obj.id, updates)}
+                  onDoubleClick={() => onObjectDoubleClick?.(obj)}
+                  onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
+                  onDragMove={makeDragMoveHandler(obj)}
+                  onDragEndExtra={handleDragEndExtra}
+                  remoteTransform={remoteXform}
+                />
+              );
+            }
           })}
-
-        {/* Render selected objects on top */}
-        {objects
-          .filter(obj => selectedObjectIds.includes(obj.id))
-          .map(obj => {
-            const remoteXform = remoteTransformByObjectId[obj.id];
-            // During resize/rotate, pass live values; else use remote transform if another user is manipulating
-            const displayObject =
-              liveTransform != null && selectedObjectIds.length === 1
-                ? { ...obj, x: liveTransform.x, y: liveTransform.y, rotation: liveTransform.rotation, width: liveTransform.width, height: liveTransform.height }
-                : remoteXform != null
-                  ? { ...obj, x: remoteXform.x, y: remoteXform.y, width: remoteXform.width, height: remoteXform.height, rotation: remoteXform.rotation }
-                  : obj;
-            return renderObject(obj, true, displayObject);
-          })}
-
-        {/* Transformer for selected objects */}
-        {selectedObjectIds.length > 0 && (
-          <>
-            <Transformer
-              ref={transformerRef}
-              keepRatio={!isAltDown}
-              borderStroke="#4285f4"
-              borderStrokeWidth={2}
-              borderDash={[6, 4]}
-              anchorFill="#ffffff"
-              anchorStroke="#4285f4"
-              anchorStrokeWidth={1.5}
-              anchorSize={8}
-              anchorCornerRadius={50}
-              enabledAnchors={[
-                'top-left',
-                'top-center',
-                'top-right',
-                'middle-left',
-                'middle-right',
-                'bottom-left',
-                'bottom-center',
-                'bottom-right',
-              ]}
-              rotateEnabled={selectedObjectIds.length === 1}
-              rotateLineVisible={false}
-              rotateAnchorAngle={
-                singleSelectedObj
-                  ? (() => {
-                      const w = liveTransform?.width ?? singleSelectedObj.width;
-                      const h = liveTransform?.height ?? singleSelectedObj.height;
-                      return (Math.atan2(w, h) * 180) / Math.PI;
-                    })()
-                  : 0
-              }
-              rotateAnchorOffset={24}
-              boundBoxFunc={(oldBox, newBox) => {
-                if (newBox.width < MIN_OBJECT_SIZE || newBox.height < MIN_OBJECT_SIZE) {
-                  return oldBox;
+        {/* Render selected objects; Transformer only when exactly one selected */}
+        {selectedObjectIds.length > 0 &&
+          objects
+            .filter((obj) => selectedObjectIds.includes(obj.id))
+            .map((obj) => {
+              const remoteXform = remoteTransformByObjectId[obj.id];
+              const remoteEdit = remoteEditingByObjectId[obj.id];
+              // During resize/rotate, pass live x/y/rotation; else use remote transform if another user is manipulating
+              const displayObject =
+                liveTransform != null
+                  ? { ...obj, x: liveTransform.x, y: liveTransform.y, rotation: liveTransform.rotation, width: liveTransform.width, height: liveTransform.height }
+                  : remoteXform != null
+                    ? { ...obj, x: remoteXform.x, y: remoteXform.y, width: remoteXform.width, height: remoteXform.height, rotation: remoteXform.rotation }
+                    : obj;
+              return (
+              <React.Fragment key={obj.id}>
+                {obj.type === 'sticky' ? (
+                  <StickyNote
+                    object={displayObject}
+                    isSelected
+                    onSelect={(additive) => onSelectObject(obj.id, additive)}
+                    onDragStart={() => handleObjectDragStart(obj.id)}
+                    onUpdate={(updates) => {
+                      if (updates.x !== undefined && updates.y !== undefined && selectedObjectIds.length > 1) {
+                        handleObjectDragEnd(obj.id, updates.x, updates.y);
+                      } else {
+                        onObjectUpdate(obj.id, updates);
+                      }
+                    }}
+                    onDoubleClick={() => onObjectDoubleClick?.(obj)}
+                    onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
+                    onDragMove={makeDragMoveHandler(obj)}
+                    onDragEndExtra={handleDragEndExtra}
+                    remoteEditing={remoteEdit}
+                    remoteTransform={remoteXform}
+                  />
+                ) : obj.type === 'text' ? (
+                  <TextElement
+                    object={displayObject}
+                    isSelected
+                    onSelect={(additive) => onSelectObject(obj.id, additive)}
+                    onDragStart={() => handleObjectDragStart(obj.id)}
+                    onUpdate={(updates) => {
+                      if (updates.x !== undefined && updates.y !== undefined && selectedObjectIds.length > 1) {
+                        handleObjectDragEnd(obj.id, updates.x, updates.y);
+                      } else {
+                        onObjectUpdate(obj.id, updates);
+                      }
+                    }}
+                    onDoubleClick={() => onObjectDoubleClick?.(obj)}
+                    onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
+                    onDragMove={makeDragMoveHandler(obj)}
+                    onDragEndExtra={handleDragEndExtra}
+                    remoteEditing={remoteEdit}
+                    remoteTransform={remoteXform}
+                  />
+                ) : (
+                  <Rectangle
+                    object={displayObject}
+                    isSelected
+                    onSelect={(additive) => onSelectObject(obj.id, additive)}
+                    onDragStart={() => handleObjectDragStart(obj.id)}
+                    onUpdate={(updates) => {
+                      if (updates.x !== undefined && updates.y !== undefined && selectedObjectIds.length > 1) {
+                        handleObjectDragEnd(obj.id, updates.x, updates.y);
+                      } else {
+                        onObjectUpdate(obj.id, updates);
+                      }
+                    }}
+                    onDoubleClick={() => onObjectDoubleClick?.(obj)}
+                    onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
+                    onDragMove={makeDragMoveHandler(obj)}
+                    onDragEndExtra={handleDragEndExtra}
+                    remoteTransform={remoteXform}
+                  />
+                )}
+              </React.Fragment>
+              );
+            })}
+        {/* Dashed bounding box when multiple shapes selected (marquee-style) */}
+        {selectedObjectIds.length > 1 && multiSelectBounds && (
+          <SelectionRect
+            x={multiSelectBounds.x}
+            y={multiSelectBounds.y}
+            width={multiSelectBounds.width}
+            height={multiSelectBounds.height}
+            visible
+          />
+        )}
+        {/* Single Transformer for one or many selected; multi = keep aspect ratio + rotate all */}
+        {selectedObjectIds.length >= 1 && (() => {
+          const singleObj = selectedObjectIds.length === 1 ? objects.find((o) => o.id === selectedObjectIds[0]) : null;
+          return (
+            <>
+              <Transformer
+                ref={transformerRef}
+                keepRatio={selectedObjectIds.length > 1 ? true : !isAltDown}
+                borderStroke="#4285f4"
+                borderStrokeWidth={2}
+                borderDash={[6, 4]}
+                anchorFill="#ffffff"
+                anchorStroke="#4285f4"
+                anchorStrokeWidth={1.5}
+                anchorSize={8}
+                anchorCornerRadius={50}
+                enabledAnchors={[
+                  'top-left',
+                  'top-center',
+                  'top-right',
+                  'middle-left',
+                  'middle-right',
+                  'bottom-left',
+                  'bottom-center',
+                  'bottom-right',
+                ]}
+                rotateEnabled={true}
+                rotateLineVisible={false}
+                rotateAnchorAngle={
+                  singleObj
+                    ? (() => {
+                        const w = liveTransform?.width ?? singleObj.width;
+                        const h = liveTransform?.height ?? singleObj.height;
+                        return (Math.atan2(w, h) * 180) / Math.PI;
+                      })()
+                    : 0
                 }
-                return newBox;
-              }}
-              onTransformStart={() => {
-                isTransformingRef.current = true;
-                startDimensionLabelRafLoop();
-                const activeAnchor = transformerRef.current?.getActiveAnchor?.() ?? null;
-                if (activeAnchor === 'rotater') {
-                  isRotatingGestureRef.current = true;
-                  setTransformMode('rotate');
-                } else {
-                  isRotatingGestureRef.current = false;
-                }
-              }}
-              onTransform={(e) => {
-                const node = e.target;
-                const currentRotation = node.rotation();
-                if (Math.abs(currentRotation - lastRotationRef.current) > 0.1) {
-                  isRotatingGestureRef.current = true;
-                  setTransformMode('rotate');
-                } else if (!isRotatingGestureRef.current) {
-                  setTransformMode('resize');
-                }
-                lastRotationRef.current = currentRotation;
-
-                if (singleSelectedObj) {
+                rotateAnchorOffset={24}
+                boundBoxFunc={(oldBox, newBox) => {
+                  if (newBox.width < MIN_OBJECT_SIZE || newBox.height < MIN_OBJECT_SIZE) return oldBox;
+                  return newBox;
+                }}
+                onTransformStart={() => {
+                  isTransformingRef.current = true;
+                  if (selectedObjectIds.length === 1) transformingObjectIdRef.current = selectedObjectIds[0];
+                  startDimensionLabelRafLoop();
+                  const activeAnchor = transformerRef.current?.getActiveAnchor?.() ?? null;
+                  if (activeAnchor === 'rotater') {
+                    isRotatingGestureRef.current = true;
+                    setTransformMode('rotate');
+                  } else {
+                    isRotatingGestureRef.current = false;
+                  }
+                }}
+                onTransform={(e) => {
+                  if (selectedObjectIds.length !== 1) return;
+                  const node = e.target;
+                  const currentRotation = node.rotation();
+                  if (Math.abs(currentRotation - lastRotationRef.current) > 0.1) {
+                    isRotatingGestureRef.current = true;
+                    setTransformMode('rotate');
+                  } else if (!isRotatingGestureRef.current) {
+                    setTransformMode('resize');
+                  }
+                  lastRotationRef.current = currentRotation;
                   const scaleX = node.scaleX();
                   const scaleY = node.scaleY();
-                  const baseW = singleSelectedObj.width;
-                  const baseH = singleSelectedObj.height;
-
+                  const baseW = singleObj!.width;
+                  const baseH = singleObj!.height;
                   const liveValues = {
                     x: node.x(),
                     y: node.y(),
@@ -620,140 +729,131 @@ export function Canvas({
                     height: Math.max(MIN_OBJECT_SIZE, baseH * scaleY),
                     rotation: currentRotation,
                   };
-
                   liveTransformRef.current = liveValues;
-                  setLiveTransform(liveValues);
-                  onLiveTransformChange?.(liveValues);
-                  // Broadcast to remote users
-                  onBroadcastTransform?.(singleSelectedObj.id, liveValues.x, liveValues.y, liveValues.width, liveValues.height, liveValues.rotation);
-                }
-              }}
-              onTransformEnd={(e) => {
-                // Handle multi-node transform end
-                const transformer = transformerRef.current;
-                if (!transformer) return;
+                  if (!transformFlushScheduledRef.current) {
+                    transformFlushScheduledRef.current = true;
+                    requestAnimationFrame(() => {
+                      transformFlushScheduledRef.current = false;
+                      const current = liveTransformRef.current;
+                      if (current && transformingObjectIdRef.current) {
+                        setLiveTransform({ ...current });
+                        onLiveTransformChange?.(current);
+                        onBroadcastTransform?.(transformingObjectIdRef.current, current.x, current.y, current.width, current.height, current.rotation);
+                      }
+                    });
+                  }
+                }}
+                onTransformEnd={() => {
+                  const transformer = transformerRef.current;
+                  const nodes = transformer?.nodes() ?? [];
+                  if (nodes.length === 0) return;
 
-                const nodes = transformer.nodes();
-                nodes.forEach((node: Konva.Node) => {
-                  const objId = node.id();
-                  const obj = objects.find(o => o.id === objId);
-                  if (!obj) return;
+                  if (nodes.length === 1) {
+                    const node = nodes[0];
+                    const obj = objects.find((o) => o.id === node.id());
+                    if (!obj) return;
+                    const scaleX = node.scaleX();
+                    const scaleY = node.scaleY();
+                    node.scaleX(1);
+                    node.scaleY(1);
+                    const newWidth = Math.max(MIN_OBJECT_SIZE, obj.width * scaleX);
+                    const newHeight = Math.max(MIN_OBJECT_SIZE, obj.height * scaleY);
+                    onObjectUpdate(obj.id, {
+                      x: node.x(),
+                      y: node.y(),
+                      width: newWidth,
+                      height: newHeight,
+                      rotation: node.rotation(),
+                    });
+                  } else {
+                    const changes: { id: string; updates: Partial<BoardObject> }[] = [];
+                    nodes.forEach((node: Konva.Node) => {
+                      const id = node.id();
+                      const obj = objects.find((o) => o.id === id);
+                      if (!obj) return;
+                      const scaleX = node.scaleX();
+                      const scaleY = node.scaleY();
+                      node.scaleX(1);
+                      node.scaleY(1);
+                      const newWidth = Math.max(MIN_OBJECT_SIZE, obj.width * scaleX);
+                      const newHeight = Math.max(MIN_OBJECT_SIZE, obj.height * scaleY);
+                      changes.push({
+                        id,
+                        updates: {
+                          x: node.x(),
+                          y: node.y(),
+                          width: newWidth,
+                          height: newHeight,
+                          rotation: node.rotation(),
+                        },
+                      });
+                    });
+                    if (changes.length > 0 && onBatchObjectUpdate) onBatchObjectUpdate(changes);
+                  }
 
-                  const scaleX = node.scaleX();
-                  const scaleY = node.scaleY();
-                  node.scaleX(1);
-                  node.scaleY(1);
-
-                  const baseW = obj.width;
-                  const baseH = obj.height;
-                  const newWidth = Math.max(MIN_OBJECT_SIZE, baseW * scaleX);
-                  const newHeight = Math.max(MIN_OBJECT_SIZE, baseH * scaleY);
-
-                  onObjectUpdate(objId, {
-                    x: node.x(),
-                    y: node.y(),
-                    width: newWidth,
-                    height: newHeight,
-                    rotation: node.rotation(),
-                  });
-                });
-
-                // Clear live transform
-                isTransformingRef.current = false;
-                liveTransformRef.current = null;
-                if (dimensionLabelRafRef.current != null) {
-                  cancelAnimationFrame(dimensionLabelRafRef.current);
-                  dimensionLabelRafRef.current = null;
-                }
-                setLiveTransform(null);
-                onLiveTransformChange?.(null);
-                setTransformMode('idle');
-                isRotatingGestureRef.current = false;
-                lastRotationRef.current = e.target.rotation();
-                // Clear RTDB transform
-                onClearTransform?.();
-              }}
-              rotateAnchorCursor="grab"
-              anchorStyleFunc={(anchor) => {
-                if ((anchor as Konva.Node).hasName('rotater')) {
-                  (anchor as Konva.Shape).scale({ x: 1.15, y: 1.15 });
-                  (anchor as Konva.Shape).sceneFunc(function (context: Konva.Context, shape: Konva.Shape) {
-                    const w = shape.getAttr('width') ?? 10;
-                    const h = shape.getAttr('height') ?? 10;
-                    const size = Math.min(w, h, 14);
-                    const cx = size / 2;
-                    const cy = size / 2;
-                    const r = Math.max(2.5, size / 2 - 0.5);
-                    const startAngle = (45 * Math.PI) / 180;
-                    const endAngle = (315 * Math.PI) / 180;
-                    shape.fill('transparent');
-                    shape.stroke('#4285f4');
-                    shape.strokeWidth(1.25);
-                    context.beginPath();
-                    context.arc(cx, cy, r, startAngle, endAngle, false);
-                    context.fillStrokeShape(shape);
-                    const tipX = cx + r * Math.cos(endAngle);
-                    const tipY = cy - r * Math.sin(endAngle);
-                    const arrowLen = size * 0.35;
-                    const leftX = tipX - arrowLen * Math.cos(endAngle - 0.4);
-                    const leftY = tipY + arrowLen * Math.sin(endAngle - 0.4);
-                    const rightX = tipX - arrowLen * Math.cos(endAngle + 0.4);
-                    const rightY = tipY + arrowLen * Math.sin(endAngle + 0.4);
-                    context.beginPath();
-                    context.moveTo(tipX, tipY);
-                    context.lineTo(leftX, leftY);
-                    context.lineTo(rightX, rightY);
-                    context.closePath();
-                    context.setAttr('fillStyle', '#4285f4');
-                    context.fill();
-                  });
-                }
-              }}
-            />
-            {singleSelectedObj && (
-              <DimensionLabel
-                object={singleSelectedObj}
-                transformMode={transformMode}
-                liveTransform={liveTransform}
-                liveTransformRef={liveTransformRef}
-                dimensionLabelTick={dimensionLabelTick}
+                  isTransformingRef.current = false;
+                  transformingObjectIdRef.current = null;
+                  liveTransformRef.current = null;
+                  if (dimensionLabelRafRef.current != null) {
+                    cancelAnimationFrame(dimensionLabelRafRef.current);
+                    dimensionLabelRafRef.current = null;
+                  }
+                  setLiveTransform(null);
+                  onLiveTransformChange?.(null);
+                  setTransformMode('idle');
+                  isRotatingGestureRef.current = false;
+                  if (nodes.length === 1) lastRotationRef.current = nodes[0].rotation();
+                  onClearTransform?.();
+                }}
+                rotateAnchorCursor="grab"
+                anchorStyleFunc={(anchor) => {
+                  if ((anchor as Konva.Node).hasName('rotater')) {
+                    (anchor as Konva.Shape).scale({ x: 1.15, y: 1.15 });
+                    (anchor as Konva.Shape).sceneFunc(function (context: Konva.Context, shape: Konva.Shape) {
+                      const w = shape.getAttr('width') ?? 10;
+                      const h = shape.getAttr('height') ?? 10;
+                      const size = Math.min(w, h, 14);
+                      const cx = size / 2;
+                      const cy = size / 2;
+                      const r = Math.max(2.5, size / 2 - 0.5);
+                      const startAngle = (45 * Math.PI) / 180;
+                      const endAngle = (315 * Math.PI) / 180;
+                      shape.fill('transparent');
+                      shape.stroke('#4285f4');
+                      shape.strokeWidth(1.25);
+                      context.beginPath();
+                      context.arc(cx, cy, r, startAngle, endAngle, false);
+                      context.fillStrokeShape(shape);
+                      const tipX = cx + r * Math.cos(endAngle);
+                      const tipY = cy - r * Math.sin(endAngle);
+                      const arrowLen = size * 0.35;
+                      const leftX = tipX - arrowLen * Math.cos(endAngle - 0.4);
+                      const leftY = tipY + arrowLen * Math.sin(endAngle - 0.4);
+                      const rightX = tipX - arrowLen * Math.cos(endAngle + 0.4);
+                      const rightY = tipY + arrowLen * Math.sin(endAngle + 0.4);
+                      context.beginPath();
+                      context.moveTo(tipX, tipY);
+                      context.lineTo(leftX, leftY);
+                      context.lineTo(rightX, rightY);
+                      context.closePath();
+                      context.setAttr('fillStyle', '#4285f4');
+                      context.fill();
+                    });
+                  }
+                }}
               />
-            )}
-          </>
-        )}
-
-        {/* Individual selection highlights when multiple items selected */}
-        {selectedObjectIds.length > 1 &&
-          selectedObjectIds.map((id) => {
-            const obj = objects.find((o) => o.id === id);
-            if (!obj) return null;
-            const remoteXform = remoteTransformByObjectId[obj.id];
-            const display = remoteXform
-              ? { ...obj, x: remoteXform.x, y: remoteXform.y, width: remoteXform.width, height: remoteXform.height, rotation: remoteXform.rotation }
-              : obj;
-            return (
-              <SelectionRect
-                key={id}
-                x={display.x}
-                y={display.y}
-                width={display.width}
-                height={display.height}
-                rotation={display.rotation ?? 0}
-                visible
-              />
-            );
-          })}
-
-        {/* Marquee selection rectangle */}
-        {marqueeRect && (
-          <SelectionRect
-            x={marqueeRect.x}
-            y={marqueeRect.y}
-            width={marqueeRect.width}
-            height={marqueeRect.height}
-            visible={isMarqueeSelecting}
-          />
-        )}
+              {singleObj && (
+                <DimensionLabel
+                  object={singleObj}
+                  transformMode={transformMode}
+                  liveTransform={liveTransform}
+                  liveTransformRef={liveTransformRef}
+                  dimensionLabelTick={dimensionLabelTick}
+                />
+              )}
+            </>
+          );
+        })()}
       </Layer>
       <Layer>
         {Object.entries(remoteCursors).map(([userId, cursor]) => (
@@ -761,5 +861,6 @@ export function Canvas({
         ))}
       </Layer>
     </Stage>
+    </div>
   );
 }

@@ -11,9 +11,15 @@ const mockStickyNote = vi.fn((props: Record<string, unknown>) => (
 const mockRectangle = vi.fn((props: Record<string, unknown>) => (
   <div data-testid="rectangle" data-remote-transform={props.remoteTransform ? JSON.stringify(props.remoteTransform) : undefined} data-object-id={(props.object as BoardObject)?.id} />
 ));
+const mockTextElement = vi.fn((props: Record<string, unknown>) => (
+  <div data-testid="text-element" data-remote-editing={props.remoteEditing ? JSON.stringify(props.remoteEditing) : undefined} data-remote-transform={props.remoteTransform ? JSON.stringify(props.remoteTransform) : undefined} data-object-id={props.object?.id}>
+    {props.object?.text}
+  </div>
+));
 
 vi.mock('../StickyNote', () => ({ StickyNote: (props: Record<string, unknown>) => mockStickyNote(props) }));
 vi.mock('../Rectangle', () => ({ Rectangle: (props: Record<string, unknown>) => mockRectangle(props) }));
+vi.mock('../TextElement', () => ({ TextElement: (props: Record<string, unknown>) => mockTextElement(props) }));
 
 vi.mock('react-konva', () => ({
   Stage: ({ children }: Record<string, unknown>) => (
@@ -42,6 +48,18 @@ describe('Canvas', () => {
   const mockViewport = { x: 0, y: 0, scaleX: 1, scaleY: 1 };
   const mockSetPosition = vi.fn();
   const mockZoomAtPoint = vi.fn();
+  const defaultCanvasProps = {
+    onObjectUpdate: vi.fn(),
+    onObjectDelete: vi.fn(),
+    onCanvasClick: vi.fn(),
+    onObjectDoubleClick: vi.fn(),
+    viewport: mockViewport,
+    setPosition: mockSetPosition,
+    zoomAtPoint: mockZoomAtPoint,
+    selectedObjectIds: [] as string[],
+    onSelectObject: vi.fn() as (id: string, additive: boolean) => void,
+    onClearSelection: vi.fn(),
+  };
 
   const stickyObject: BoardObject = {
     id: 'sticky-1',
@@ -74,22 +92,31 @@ describe('Canvas', () => {
     updatedBy: 'user-1',
   };
 
+  const textObject: BoardObject = {
+    id: 'text-1',
+    type: 'text',
+    x: 80,
+    y: 90,
+    width: 200,
+    height: 40,
+    rotation: 0,
+    text: 'Some text',
+    color: 'transparent',
+    createdBy: 'user-1',
+    createdAt: 1,
+    updatedAt: 1,
+    updatedBy: 'user-1',
+  };
+
   const baseProps = {
+    ...defaultCanvasProps,
     objects: [] as BoardObject[],
-    onObjectUpdate: vi.fn(),
-    onCanvasClick: vi.fn(),
-    onObjectDoubleClick: vi.fn(),
-    selectedObjectIds: [] as string[],
-    onSelectObject: vi.fn(),
-    onClearSelection: vi.fn(),
-    viewport: mockViewport,
-    setPosition: mockSetPosition,
-    zoomAtPoint: mockZoomAtPoint,
   };
 
   beforeEach(() => {
     mockStickyNote.mockClear();
     mockRectangle.mockClear();
+    mockTextElement.mockClear();
   });
 
   it('should render the stage', () => {
@@ -116,15 +143,8 @@ describe('Canvas', () => {
     render(
       <Canvas
         objects={[stickyObject]}
-        onObjectUpdate={vi.fn()}
-        onCanvasClick={vi.fn()}
-        onObjectDoubleClick={vi.fn()}
-        viewport={mockViewport}
-        setPosition={mockSetPosition}
-        zoomAtPoint={mockZoomAtPoint}
+        {...defaultCanvasProps}
         selectedObjectIds={['sticky-1']}
-        onSelectObject={vi.fn()}
-        onClearSelection={vi.fn()}
         remoteEditings={remoteEditings}
       />
     );
@@ -152,15 +172,8 @@ describe('Canvas', () => {
     render(
       <Canvas
         objects={[stickyObject]}
-        onObjectUpdate={vi.fn()}
-        onCanvasClick={vi.fn()}
-        onObjectDoubleClick={vi.fn()}
-        viewport={mockViewport}
-        setPosition={mockSetPosition}
-        zoomAtPoint={mockZoomAtPoint}
+        {...defaultCanvasProps}
         selectedObjectIds={['sticky-1']}
-        onSelectObject={vi.fn()}
-        onClearSelection={vi.fn()}
         remoteTransforms={remoteTransforms}
       />
     );
@@ -189,15 +202,8 @@ describe('Canvas', () => {
     render(
       <Canvas
         objects={[stickyObject]}
-        onObjectUpdate={vi.fn()}
-        onCanvasClick={vi.fn()}
-        onObjectDoubleClick={vi.fn()}
-        viewport={mockViewport}
-        setPosition={mockSetPosition}
-        zoomAtPoint={mockZoomAtPoint}
+        {...defaultCanvasProps}
         selectedObjectIds={['sticky-1']}
-        onSelectObject={vi.fn()}
-        onClearSelection={vi.fn()}
         remoteTransforms={remoteTransforms}
       />
     );
@@ -228,15 +234,8 @@ describe('Canvas', () => {
     render(
       <Canvas
         objects={[rectObject]}
-        onObjectUpdate={vi.fn()}
-        onCanvasClick={vi.fn()}
-        onObjectDoubleClick={vi.fn()}
-        viewport={mockViewport}
-        setPosition={mockSetPosition}
-        zoomAtPoint={mockZoomAtPoint}
+        {...defaultCanvasProps}
         selectedObjectIds={['rect-1']}
-        onSelectObject={vi.fn()}
-        onClearSelection={vi.fn()}
         remoteTransforms={remoteTransforms}
       />
     );
@@ -245,5 +244,15 @@ describe('Canvas', () => {
     const selectedProps = selectedRectCalls[0][0];
     expect(selectedProps.remoteTransform).toBeDefined();
     expect((selectedProps.remoteTransform as LiveTransformData).x).toBe(80);
+  });
+
+  it('renders TextElement for text type objects', () => {
+    render(
+      <Canvas
+        objects={[textObject]}
+        {...defaultCanvasProps}
+      />
+    );
+    expect(screen.getByTestId('text-element')).toBeInTheDocument();
   });
 });

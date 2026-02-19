@@ -3,6 +3,15 @@ import { render, screen } from '@testing-library/react';
 import { StickyNote } from '../StickyNote';
 import type { BoardObject, LiveEditingData } from '../../../types';
 
+vi.mock('../../../utils/textMeasure', () => ({
+  measureTextHeight: () => 20,
+  STICKY_TEXT_OFFSET_Y: 26,
+  STICKY_TEXT_PADDING_BOTTOM: 8,
+  STICKY_MIN_HEIGHT: 60,
+  STICKY_FONT_SIZE: 16,
+  STICKY_FONT_FAMILY: "'Segoe Print', 'Comic Sans MS', cursive",
+}));
+
 vi.mock('react-konva', () => ({
   Group: ({ children, onClick }: Record<string, unknown>) => (
     <div data-testid="sticky-group" onClick={onClick as () => void}>

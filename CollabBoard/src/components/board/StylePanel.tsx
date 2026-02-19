@@ -3,6 +3,8 @@ import type { BoardObject } from '../../types';
 
 interface StylePanelProps {
   selectedObject: BoardObject | null;
+  /** When > 1, panel shows "N items" and only color (applies to all) */
+  selectedCount?: number;
   onUpdate: (updates: Partial<BoardObject>) => void;
   liveTransform?: {
     width: number;
@@ -18,15 +20,17 @@ const MIN_SIZE = 20;
 
 export const StylePanel: React.FC<StylePanelProps> = ({
   selectedObject,
+  selectedCount = 1,
   onUpdate,
   liveTransform,
   onCollapse,
 }) => {
+  const isMulti = selectedCount > 1;
   const [localValues, setLocalValues] = useState(() => ({
     width: selectedObject ? String(Math.round(selectedObject.width)) : '',
     height: selectedObject ? String(Math.round(selectedObject.height)) : '',
     x: selectedObject ? String(Math.round(selectedObject.x)) : '',
-    y: selectedObject ? String(Math.round(selectedObject.y)) : '',
+    y: selectedObject ? String(Math.round(-selectedObject.y)) : '',
     color: selectedObject ? selectedObject.color : '',
   }));
 
@@ -45,7 +49,7 @@ export const StylePanel: React.FC<StylePanelProps> = ({
       width: String(Math.round(displayValues.width)),
       height: String(Math.round(displayValues.height)),
       x: String(Math.round(displayValues.x)),
-      y: String(Math.round(displayValues.y)),
+      y: String(Math.round(-displayValues.y)),
       color: selectedObject.color,
     });
 
@@ -73,18 +77,21 @@ export const StylePanel: React.FC<StylePanelProps> = ({
     const numValue = parseFloat(localValues[field]);
     
     if (isNaN(numValue)) {
-      // Restore original value if invalid
+      // Restore original value if invalid (Y is displayed as -y)
+      const restoreValue = field === 'y' ? -selectedObject.y : selectedObject[field];
       setLocalValues((prev) => ({
         ...prev,
-        [field]: String(Math.round(selectedObject[field])),
+        [field]: String(Math.round(restoreValue)),
       }));
       return;
     }
 
-    // Apply constraints
+    // Apply constraints; Y display is inverted (display = -storage)
     let finalValue = numValue;
     if (field === 'width' || field === 'height') {
       finalValue = Math.max(MIN_SIZE, numValue);
+    } else if (field === 'y') {
+      finalValue = -numValue;
     }
 
     // Update if value changed
@@ -92,10 +99,11 @@ export const StylePanel: React.FC<StylePanelProps> = ({
       onUpdate({ [field]: finalValue });
     }
 
-    // Update local state with rounded value
+    // Update local state with rounded value (show -y for Y)
+    const displayValue = field === 'y' ? -finalValue : finalValue;
     setLocalValues((prev) => ({
       ...prev,
-      [field]: String(Math.round(finalValue)),
+      [field]: String(Math.round(displayValue)),
     }));
   };
 
@@ -108,7 +116,7 @@ export const StylePanel: React.FC<StylePanelProps> = ({
   return (
     <div className="style-panel" data-testid="style-panel">
       <div className="style-panel-header">
-        <h3>Style</h3>
+        <h3>{isMulti ? `${selectedCount} items` : 'Style'}</h3>
         {onCollapse && (
           <button
             type="button"
@@ -123,15 +131,19 @@ export const StylePanel: React.FC<StylePanelProps> = ({
       </div>
 
       <div className="style-panel-content">
+        {!isMulti && (
+        <>
         {/* Object Type */}
         <div className="property-group">
           <label className="property-label">Type</label>
           <div className="property-value">
-            {selectedObject.type === 'rectangle' ? 'Rectangle' : 'Sticky Note'}
+            {selectedObject.type === 'rectangle' ? 'Rectangle' : selectedObject.type === 'sticky' ? 'Sticky Note' : 'Text'}
           </div>
         </div>
+        </>
+        )}
 
-        {/* Color */}
+        {/* Color (single or multi: multi applies to all) */}
         <div className="property-group">
           <label htmlFor="color-input" className="property-label">
             Color
@@ -155,6 +167,8 @@ export const StylePanel: React.FC<StylePanelProps> = ({
           </div>
         </div>
 
+        {!isMulti && (
+        <>
         {/* Dimensions */}
         <div className="property-group">
           <label htmlFor="width-input" className="property-label">
@@ -252,6 +266,8 @@ export const StylePanel: React.FC<StylePanelProps> = ({
             max={180}
           />
         </div>
+        </>
+        )}
       </div>
     </div>
   );

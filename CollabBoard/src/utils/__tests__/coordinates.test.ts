@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { screenToWorld, worldToScreen } from '../coordinates';
+import { screenToWorld, worldToScreen, rectsIntersect } from '../coordinates';
 
-describe('coordinates utility', () => {
+describe('coordinates utility (y-down: world Y increases downward like screen)', () => {
   describe('screenToWorld', () => {
     it('should convert screen coordinates to world coordinates with no transform', () => {
       const viewport = { x: 0, y: 0, scaleX: 1, scaleY: 1 };
@@ -63,12 +63,24 @@ describe('coordinates utility', () => {
       const viewport = { x: 123.45, y: 67.89, scaleX: 1.5, scaleY: 1.5 };
       const screenX = 250;
       const screenY = 350;
-      
+
       const world = screenToWorld(screenX, screenY, viewport);
       const backToScreen = worldToScreen(world.x, world.y, viewport);
-      
+
       expect(backToScreen.x).toBeCloseTo(screenX, 5);
       expect(backToScreen.y).toBeCloseTo(screenY, 5);
+    });
+  });
+
+  describe('rectsIntersect', () => {
+    it('returns true when rectangles overlap', () => {
+      expect(rectsIntersect({ x: 0, y: 0, width: 10, height: 10 }, { x: 5, y: 5, width: 10, height: 10 })).toBe(true);
+    });
+    it('returns false when rectangles do not touch', () => {
+      expect(rectsIntersect({ x: 0, y: 0, width: 10, height: 10 }, { x: 20, y: 20, width: 10, height: 10 })).toBe(false);
+    });
+    it('returns true when rectangles touch on edge', () => {
+      expect(rectsIntersect({ x: 0, y: 0, width: 10, height: 10 }, { x: 10, y: 0, width: 10, height: 10 })).toBe(true);
     });
   });
 });

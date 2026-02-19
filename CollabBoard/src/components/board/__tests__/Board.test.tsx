@@ -74,6 +74,22 @@ vi.mock('../../../hooks/useLiveEditing', () => ({
   }),
 }));
 
+vi.mock('../../../hooks/useSelection', () => ({
+  useSelection: () => ({
+    remoteSelectionByObject: {},
+    setLocalSelection: vi.fn(),
+    cleanupSelection: vi.fn(),
+  }),
+}));
+
+vi.mock('../../../firebase/boardMeta', () => ({
+  onBoardMetaChange: (boardId: string, callback: (meta: unknown) => void) => {
+    callback({ id: boardId, name: 'Test Board', creatorId: 'u1', creatorName: 'Alice', members: [], memberNames: {}, createdAt: 0, updatedAt: 0, visibility: 'open' });
+    return () => {};
+  },
+  updateBoardName: vi.fn(),
+}));
+
 let capturedOnObjectDoubleClick: ((obj: BoardObject) => void) | null = null;
 
 vi.mock('../Canvas', () => ({

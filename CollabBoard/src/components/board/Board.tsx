@@ -5,6 +5,7 @@ import { Canvas } from './Canvas';
 import { TextEditor } from './TextEditor';
 import { PresenceBar } from './PresenceBar';
 import { ShapeSidebar } from './ShapeSidebar';
+import { UndoRedoClearPanel } from './UndoRedoClearPanel';
 import { StylePanel } from './StylePanel';
 import { ContextMenu } from './ContextMenu';
 import { useAuth } from '../../hooks/useAuth';
@@ -15,8 +16,10 @@ import { useViewport } from '../../hooks/useViewport';
 import { useUndoRedo } from '../../hooks/useUndoRedo';
 import { useLiveTransforms } from '../../hooks/useLiveTransforms';
 import { useLiveEditing } from '../../hooks/useLiveEditing';
-import { screenToWorld } from '../../utils/coordinates';
-import type { BoardObject } from '../../types';
+import { useSelection } from '../../hooks/useSelection';
+import { onBoardMetaChange, updateBoardName } from '../../firebase/boardMeta';
+import { screenToWorld, worldToScreen } from '../../utils/coordinates';
+import type { BoardObject, BoardMeta } from '../../types';
 
 function generateId() {
   return `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -28,11 +31,10 @@ export function Board() {
   const { objects, addObject, updateObject, deleteObject, clearObjects } = useBoardObjects(boardId);
   const { cursors, updateCursor, cleanupCursor } = useCursors(boardId, user);
   const { onlineUsers, cleanupPresence } = usePresence(boardId, user, cursors);
-  const { viewport, setPosition, zoomAtPoint } = useViewport();
+  const { viewport, setPosition, zoomAtPoint } = useViewport(boardId);
   const { remoteTransforms, broadcastTransform, clearTransform, cleanupTransform } = useLiveTransforms(boardId, user);
   const { remoteEditings, broadcastEditing, clearEditing, cleanupEditing } = useLiveEditing(boardId, user);
-
-  // Multi-select state
+  const { remoteSelectionByObject, setLocalSelection, cleanupSelection } = useSelection(boardId, user);
   const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([]);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -42,6 +44,10 @@ export function Board() {
     pasteWorldY: number;
   } | null>(null);
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const lastDropHandledAtRef = useRef<number>(0);
+  const clipboardRef = useRef<BoardObject[]>([]);
+  const [clipboardCount, setClipboardCount] = useState(0);
+  const lastClickedWorldRef = useRef<{ x: number; y: number } | null>(null);
   const [liveTransform, setLiveTransform] = useState<{
     width: number;
     height: number;
@@ -56,12 +62,36 @@ export function Board() {
     width: number;
     height: number;
     text: string;
+    objectType: 'sticky' | 'text';
   } | null>(null);
   const [stylePanelOpen, setStylePanelOpen] = useState(false);
+  const [boardMeta, setBoardMeta] = useState<BoardMeta | null>(null);
+  const [isDraggingShapeFromSidebar, setIsDraggingShapeFromSidebar] = useState(false);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef(viewport);
   viewportRef.current = viewport;
-  const lastDropHandledAtRef = useRef<number>(0);
+
+  useEffect(() => {
+    return onBoardMetaChange(boardId, setBoardMeta);
+  }, [boardId]);
+
+  const { pushAction, undo, redo, canUndo, canRedo } = useUndoRedo({
+    addObject,
+    updateObject: async (id: string, updates: Partial<BoardObject>) => {
+      await updateObject(id, updates);
+    },
+    deleteObject,
+    onApply: () => {
+      setEditingObject(null);
+      clearEditing();
+    },
+  });
+
+  const boardDisplayName = boardMeta?.name?.trim() || 'Untitled';
+  const handleBoardNameChange = useCallback(
+    (name: string) => updateBoardName(boardId, name.trim() || ''),
+    [boardId]
+  );
 
   // Cursor sync: use canvas container pointermove so cursor updates even when pointer is over selected shape/Transformer
   useEffect(() => {
@@ -82,20 +112,33 @@ export function Board() {
     return () => container.removeEventListener('pointermove', handlePointerMove);
   }, [updateCursor]);
 
-  // Clipboard for copy/paste (state so context menu can disable Paste when empty)
-  const clipboardRef = useRef<BoardObject[]>([]);
-  const [clipboardCount, setClipboardCount] = useState(0);
-  // Last click position in world coords (for Ctrl+V paste)
-  const lastClickedWorldRef = useRef<{ x: number; y: number } | null>(null);
-
-  // Undo/redo
-  const { pushAction, undo, redo, canUndo, canRedo } = useUndoRedo({
-    addObject,
-    updateObject: async (id: string, updates: Partial<BoardObject>) => {
-      await updateObject(id, updates);
+  const selectObject = useCallback(
+    (id: string, additive: boolean) => {
+      if (remoteSelectionByObject[id]) return;
+      if (additive) {
+        setSelectedObjectIds((prev) =>
+          prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+        );
+      } else {
+        setSelectedObjectIds([id]);
+      }
     },
-    deleteObject,
-  });
+    [remoteSelectionByObject]
+  );
+
+  const clearSelection = useCallback(() => {
+    setSelectedObjectIds([]);
+    setContextMenu(null);
+  }, []);
+
+  useEffect(() => {
+    setLocalSelection(selectedObjectIds.length === 1 ? selectedObjectIds[0] : null);
+  }, [selectedObjectIds, setLocalSelection]);
+
+  const selectAll = useCallback(() => {
+    const lockedIds = new Set(Object.keys(remoteSelectionByObject));
+    setSelectedObjectIds(objects.map((o) => o.id).filter((id) => !lockedIds.has(id)));
+  }, [objects, remoteSelectionByObject]);
 
   console.log('📊 Board state:', {
     objectCount: objects.length,
@@ -107,29 +150,7 @@ export function Board() {
     selectedCount: selectedObjectIds.length,
   });
 
-  // --- Selection helpers ---
-  const selectObject = useCallback((id: string, additive: boolean) => {
-    if (additive) {
-      setSelectedObjectIds(prev =>
-        prev.includes(id)
-          ? prev.filter(x => x !== id)
-          : [...prev, id]
-      );
-    } else {
-      setSelectedObjectIds([id]);
-    }
-  }, []);
-
-  const clearSelection = useCallback(() => {
-    setSelectedObjectIds([]);
-    setContextMenu(null);
-  }, []);
-
-  const selectAll = useCallback(() => {
-    setSelectedObjectIds(objects.map(o => o.id));
-  }, [objects]);
-
-  const createObjectAtCenter = useCallback((type: 'rectangle' | 'sticky') => {
+  const createObjectAtCenter = useCallback((type: 'rectangle' | 'sticky' | 'text') => {
     if (!user) {
       console.error('❌ No user found - cannot create object');
       return;
@@ -137,12 +158,13 @@ export function Board() {
 
     console.log(`✅ User exists, creating ${type}...`);
 
-    const canvasWidth = window.innerWidth;
-    const canvasHeight = window.innerHeight - 48;
-    const screenCenterX = canvasWidth / 2;
-    const screenCenterY = canvasHeight / 2;
-    const worldCenterX = (screenCenterX - viewport.x) / viewport.scaleX;
-    const worldCenterY = (screenCenterY - viewport.y) / viewport.scaleY;
+    const screenCenterX = window.innerWidth / 2;
+    const screenCenterY = (window.innerHeight - 48) / 2;
+    const { x: worldCenterX, y: worldCenterY } = screenToWorld(
+      screenCenterX,
+      screenCenterY,
+      viewport
+    );
 
     const id = generateId();
     let newObject: BoardObject;
@@ -166,6 +188,25 @@ export function Board() {
         updatedBy: user.uid,
       };
       console.log('📝 Creating sticky note:', newObject);
+    } else if (type === 'text') {
+      const textWidth = 200;
+      const textHeight = 40;
+      newObject = {
+        id,
+        type: 'text',
+        x: worldCenterX - (textWidth / 2),
+        y: worldCenterY - (textHeight / 2),
+        width: textWidth,
+        height: textHeight,
+        rotation: 0,
+        text: '',
+        color: 'transparent',
+        createdBy: user.uid,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        updatedBy: user.uid,
+      };
+      console.log('📝 Creating text element:', newObject);
     } else {
       const rectWidth = 200;
       const rectHeight = 150;
@@ -201,97 +242,76 @@ export function Board() {
     setContextMenu(null);
   }, []);
 
-  const handleObjectUpdate = useCallback(
-    (id: string, updates: Partial<BoardObject>) => {
-      updateObject(id, updates);
-    },
-    [updateObject]
-  );
-
-  // --- Delete selected (remove only, no clipboard) ---
   const handleDeleteSelected = useCallback(() => {
     if (selectedObjectIds.length === 0) return;
-    const toDelete = objects.filter(o => selectedObjectIds.includes(o.id));
-    toDelete.forEach(o => deleteObject(o.id));
+    const toDelete = objects.filter((o) => selectedObjectIds.includes(o.id));
+    toDelete.forEach((o) => deleteObject(o.id));
     pushAction({ type: 'delete', objects: toDelete });
     setSelectedObjectIds([]);
   }, [selectedObjectIds, objects, deleteObject, pushAction]);
 
-  // --- Copy selected to clipboard ---
   const handleCopySelected = useCallback(() => {
     if (selectedObjectIds.length === 0) return;
-    const toCopy = objects.filter(o => selectedObjectIds.includes(o.id));
-    clipboardRef.current = toCopy.map(o => ({ ...o }));
+    const toCopy = objects.filter((o) => selectedObjectIds.includes(o.id));
+    clipboardRef.current = toCopy.map((o) => ({ ...o }));
     setClipboardCount(toCopy.length);
   }, [selectedObjectIds, objects]);
 
-  // --- Cut selected (copy to clipboard, then delete) ---
   const handleCutSelected = useCallback(() => {
     if (selectedObjectIds.length === 0) return;
-    const toCut = objects.filter(o => selectedObjectIds.includes(o.id));
-    clipboardRef.current = toCut.map(o => ({ ...o }));
+    const toCut = objects.filter((o) => selectedObjectIds.includes(o.id));
+    clipboardRef.current = toCut.map((o) => ({ ...o }));
     setClipboardCount(toCut.length);
-    toCut.forEach(o => deleteObject(o.id));
+    toCut.forEach((o) => deleteObject(o.id));
     pushAction({ type: 'delete', objects: toCut });
     setSelectedObjectIds([]);
   }, [selectedObjectIds, objects, deleteObject, pushAction]);
 
-  const handleTextSubmit = useCallback(
-    (text: string) => {
-      if (editingObject) {
-        updateObject(editingObject.id, { text });
-        clearEditing();
-        setEditingObject(null);
-      }
-    },
-    [editingObject, updateObject, clearEditing]
-  );
-
-  const handleMouseMove = useCallback(
-    (x: number, y: number) => {
-      lastPointerRef.current = { x, y };
-      updateCursor(x, y);
-    },
-    [updateCursor]
-  );
-
-  const openTextEditorForObject = useCallback(
-    (obj: BoardObject) => {
-      if (obj.type !== 'sticky') return;
-      const screenX = obj.x * viewport.scaleX + viewport.x;
-      const screenY = obj.y * viewport.scaleY + viewport.y;
-      const screenWidth = obj.width * viewport.scaleX;
-      const screenHeight = obj.height * viewport.scaleY;
-      setEditingObject({
-        id: obj.id,
-        x: screenX,
-        y: screenY,
-        width: screenWidth,
-        height: screenHeight,
-        text: obj.text || '',
+  const handlePaste = useCallback(
+    (worldPos?: { x: number; y: number }) => {
+      if (clipboardRef.current.length === 0 || !user) return;
+      const clip = clipboardRef.current;
+      const minX = Math.min(...clip.map((o) => o.x));
+      const minY = Math.min(...clip.map((o) => o.y));
+      const target = worldPos ?? lastClickedWorldRef.current ?? { x: minX + 20, y: minY + 20 };
+      const newIds: string[] = [];
+      const newObjects: BoardObject[] = [];
+      clip.forEach((obj) => {
+        const newId = generateId();
+        newIds.push(newId);
+        newObjects.push({
+          ...obj,
+          id: newId,
+          x: target.x + (obj.x - minX),
+          y: target.y + (obj.y - minY),
+          createdBy: user.uid,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          updatedBy: user.uid,
+        });
       });
-      setSelectedObjectIds([obj.id]);
-      broadcastEditing(obj.id, obj.text ?? '');
+      Promise.all(newObjects.map((o) => addObject(o)))
+        .then(() => {
+          setSelectedObjectIds(newIds);
+          pushAction({ type: 'add', objects: newObjects });
+          clipboardRef.current = newObjects.map((o) => ({ ...o }));
+          setClipboardCount(newObjects.length);
+        })
+        .catch((err) => console.error('❌ Failed to paste objects:', err));
     },
-    [viewport, broadcastEditing]
+    [user, addObject, pushAction]
   );
 
-  const handleObjectDoubleClick = useCallback(
-    (obj: BoardObject) => {
-      if (obj.type === 'sticky') {
-        openTextEditorForObject(obj);
-      }
-    },
-    [openTextEditorForObject]
-  );
+  const handleLastClickPosition = useCallback((worldPos: { x: number; y: number }) => {
+    lastClickedWorldRef.current = worldPos;
+  }, []);
 
-  // --- Duplicate selected ---
   const duplicateSelectedObjects = useCallback(() => {
     if (!user || selectedObjectIds.length === 0) return;
     const newIds: string[] = [];
     const newObjects: BoardObject[] = [];
-    const promises = selectedObjectIds.map(id => {
-      const obj = objects.find(o => o.id === id);
+    const promises = selectedObjectIds.map((id) => {
+      const obj = objects.find((o) => o.id === id);
       if (!obj) return Promise.resolve();
       const newId = generateId();
       newIds.push(newId);
@@ -313,65 +333,157 @@ export function Board() {
         setSelectedObjectIds(newIds);
         pushAction({ type: 'add', objects: newObjects });
       })
-      .catch(err => console.error('❌ Failed to duplicate objects:', err));
+      .catch((err) => console.error('❌ Failed to duplicate objects:', err));
   }, [objects, user, addObject, selectedObjectIds, pushAction]);
 
-  const handleObjectRightClick = useCallback((obj: BoardObject, screenPos: { x: number; y: number }) => {
-    setSelectedObjectIds(prev => prev.includes(obj.id) ? prev : [obj.id]);
-    const world = screenToWorld(screenPos.x, screenPos.y, viewport);
-    setContextMenu({ x: screenPos.x, y: screenPos.y, objectId: obj.id, pasteWorldX: world.x, pasteWorldY: world.y });
-  }, [viewport]);
+  const handleObjectUpdate = useCallback(
+    (id: string, updates: Partial<BoardObject>) => {
+      const obj = objects.find((o) => o.id === id);
+      if (obj) {
+        const before = Object.fromEntries(
+          (Object.keys(updates) as (keyof BoardObject)[]).map((k) => [k, obj[k]])
+        ) as Partial<BoardObject>;
+        pushAction({ type: 'update', changes: [{ id, before, after: updates }] });
+      }
+      updateObject(id, updates);
+    },
+    [objects, updateObject, pushAction]
+  );
 
-  const handleCanvasRightClick = useCallback((screenPos: { x: number; y: number }) => {
-    const world = screenToWorld(screenPos.x, screenPos.y, viewport);
-    setContextMenu({ x: screenPos.x, y: screenPos.y, objectId: null, pasteWorldX: world.x, pasteWorldY: world.y });
-  }, [viewport]);
+  const handleBatchObjectUpdate = useCallback(
+    (changes: { id: string; updates: Partial<BoardObject> }[]) => {
+      if (changes.length === 0) return;
+      const undoChanges = changes
+        .map(({ id, updates: ups }) => {
+          const obj = objects.find((o) => o.id === id);
+          if (!obj) return null;
+          const before = Object.fromEntries(
+            (Object.keys(ups) as (keyof BoardObject)[]).map((k) => [k, obj[k]])
+          ) as Partial<BoardObject>;
+          return { id, before, after: ups };
+        })
+        .filter((c): c is { id: string; before: Partial<BoardObject>; after: Partial<BoardObject> } => c !== null);
+      if (undoChanges.length > 0) {
+        pushAction({ type: 'update', changes: undoChanges });
+      }
+      changes.forEach(({ id, updates: ups }) => updateObject(id, ups));
+    },
+    [objects, updateObject, pushAction]
+  );
 
-  const handleLastClickPosition = useCallback((worldPos: { x: number; y: number }) => {
-    lastClickedWorldRef.current = worldPos;
-  }, []);
+  const handleObjectDelete = useCallback(
+    (id: string) => {
+      deleteObject(id);
+      setSelectedObjectIds((prev) => prev.filter((x) => x !== id));
+    },
+    [deleteObject]
+  );
 
-  // --- Paste from clipboard (optional worldPos = paste at cursor/context; else use last clicked) ---
-  const handlePaste = useCallback((worldPos?: { x: number; y: number }) => {
-    if (clipboardRef.current.length === 0 || !user) return;
-    const clip = clipboardRef.current;
-    const minX = Math.min(...clip.map(o => o.x));
-    const minY = Math.min(...clip.map(o => o.y));
-    const target = worldPos ?? lastClickedWorldRef.current ?? { x: minX + 20, y: minY + 20 };
-    const newIds: string[] = [];
-    const newObjects: BoardObject[] = [];
-    clip.forEach(obj => {
-      const newId = generateId();
-      newIds.push(newId);
-      newObjects.push({
-        ...obj,
-        id: newId,
-        x: target.x + (obj.x - minX),
-        y: target.y + (obj.y - minY),
-        createdBy: user.uid,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        updatedBy: user.uid,
+  const handleTextSubmit = useCallback(
+    (text: string) => {
+      if (editingObject) {
+        // Use current object text from store so undo restores the correct value (avoids stale editingObject)
+        const obj = objects.find((o) => o.id === editingObject.id);
+        const beforeText = (obj?.text ?? editingObject.text) ?? '';
+        if (beforeText !== text) {
+          pushAction({
+            type: 'update',
+            changes: [{ id: editingObject.id, before: { text: beforeText }, after: { text } }],
+          });
+        }
+        updateObject(editingObject.id, { text });
+        clearEditing();
+        setEditingObject(null);
+      }
+    },
+    [editingObject, objects, updateObject, clearEditing, pushAction]
+  );
+
+  const handleMouseMove = useCallback(
+    (x: number, y: number) => {
+      lastPointerRef.current = { x, y };
+      updateCursor(x, y);
+    },
+    [updateCursor]
+  );
+
+  const openTextEditorForObject = useCallback(
+    (obj: BoardObject) => {
+      if (obj.type !== 'sticky' && obj.type !== 'text') return;
+      const { x: screenX, y: screenY } = worldToScreen(obj.x, obj.y, viewport);
+      const screenWidth = obj.width * viewport.scaleX;
+      const screenHeight = obj.height * viewport.scaleY;
+      setEditingObject({
+        id: obj.id,
+        x: screenX,
+        y: screenY,
+        width: screenWidth,
+        height: screenHeight,
+        text: obj.text || '',
+        objectType: obj.type as 'sticky' | 'text',
       });
-    });
-    Promise.all(newObjects.map(o => addObject(o)))
-      .then(() => {
-        setSelectedObjectIds(newIds);
-        pushAction({ type: 'add', objects: newObjects });
-        clipboardRef.current = newObjects.map(o => ({ ...o }));
-        setClipboardCount(newObjects.length);
-      })
-      .catch(err => console.error('❌ Failed to paste objects:', err));
-  }, [user, addObject, pushAction]);
+      setSelectedObjectIds([obj.id]);
+      broadcastEditing(obj.id, obj.text ?? '');
+    },
+    [viewport, broadcastEditing]
+  );
+
+  const handleObjectDoubleClick = useCallback(
+    (obj: BoardObject) => {
+      if (obj.type === 'sticky' || obj.type === 'text') {
+        openTextEditorForObject(obj);
+      }
+    },
+    [openTextEditorForObject]
+  );
+
+  const handleObjectRightClick = useCallback(
+    (obj: BoardObject, screenPos: { x: number; y: number }) => {
+      setSelectedObjectIds((prev) => (prev.includes(obj.id) ? prev : [obj.id]));
+      const world = screenToWorld(screenPos.x, screenPos.y, viewport);
+      setContextMenu({
+        x: screenPos.x,
+        y: screenPos.y,
+        objectId: obj.id,
+        pasteWorldX: world.x,
+        pasteWorldY: world.y,
+      });
+    },
+    [viewport]
+  );
+
+  const handleCanvasRightClick = useCallback(
+    (screenPos: { x: number; y: number }) => {
+      const world = screenToWorld(screenPos.x, screenPos.y, viewport);
+      setContextMenu({
+        x: screenPos.x,
+        y: screenPos.y,
+        objectId: null,
+        pasteWorldX: world.x,
+        pasteWorldY: world.y,
+      });
+    },
+    [viewport]
+  );
 
   const handleShapeDrop = useCallback(
-    (shapeType: 'rectangle' | 'sticky', screenX: number, screenY: number) => {
+    (shapeType: 'rectangle' | 'sticky' | 'text', screenX: number, screenY: number) => {
       if (!user) {
         console.error('❌ No user found - cannot create object');
         return;
       }
 
-      const worldPos = screenToWorld(screenX, screenY, viewport);
+      const v = viewportRef.current;
+      const scaleX = Math.min(100, Math.max(0.01, v.scaleX));
+      const scaleY = Math.min(100, Math.max(0.01, v.scaleY));
+      const safeViewport = { ...v, scaleX, scaleY };
+      let worldPos = screenToWorld(screenX, screenY, safeViewport);
+      const CLAMP = 1e6;
+      worldPos = {
+        x: Math.max(-CLAMP, Math.min(CLAMP, worldPos.x)),
+        y: Math.max(-CLAMP, Math.min(CLAMP, worldPos.y)),
+      };
+
       const id = generateId();
       let newObject: BoardObject;
 
@@ -393,6 +505,24 @@ export function Board() {
           updatedAt: Date.now(),
           updatedBy: user.uid,
         };
+      } else if (shapeType === 'text') {
+        const textWidth = 200;
+        const textHeight = 40;
+        newObject = {
+          id,
+          type: 'text',
+          x: worldPos.x - textWidth / 2,
+          y: worldPos.y - textHeight / 2,
+          width: textWidth,
+          height: textHeight,
+          rotation: 0,
+          text: '',
+          color: 'transparent',
+          createdBy: user.uid,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          updatedBy: user.uid,
+        };
       } else {
         const rectWidth = 200;
         const rectHeight = 150;
@@ -404,7 +534,7 @@ export function Board() {
           width: rectWidth,
           height: rectHeight,
           rotation: 0,
-          color: '#90CAF9',
+          color: '#90CAF9', // Light blue
           createdBy: user.uid,
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -422,7 +552,7 @@ export function Board() {
           console.error(`❌ Failed to add ${shapeType}:`, err);
         });
     },
-    [addObject, user, viewport, pushAction]
+    [addObject, user, pushAction]
   );
 
   const handleCanvasDragOver = useCallback((e: React.DragEvent) => {
@@ -430,20 +560,24 @@ export function Board() {
     e.dataTransfer.dropEffect = 'copy';
   }, []);
 
+  const handleCanvasDragEnter = useCallback((e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes('shape-type')) {
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  }, []);
+
+  const handleCanvasDragLeave = useCallback((_e: React.DragEvent) => {
+    // Optional: could clear drop indicator
+  }, []);
+
   const handleCanvasDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
       e.stopPropagation();
-
-      // Guard against duplicate drop events (browser can fire multiple times)
       const now = Date.now();
-      if (now - lastDropHandledAtRef.current < 300) {
-        return;
-      }
+      if (now - lastDropHandledAtRef.current < 300) return;
       lastDropHandledAtRef.current = now;
-
-      const shapeType = e.dataTransfer.getData('shape-type') as 'rectangle' | 'sticky';
-
+      const shapeType = e.dataTransfer.getData('shape-type') as 'rectangle' | 'sticky' | 'text';
       if (shapeType && canvasContainerRef.current) {
         const rect = canvasContainerRef.current.getBoundingClientRect();
         const x = e.clientX - rect.left;
@@ -456,40 +590,35 @@ export function Board() {
 
   const handleSelectedObjectUpdate = useCallback(
     (updates: Partial<BoardObject>) => {
+      if (selectedObjectIds.length === 0) return;
       if (selectedObjectIds.length === 1) {
         handleObjectUpdate(selectedObjectIds[0], updates);
+      } else {
+        // Multi-select: apply color to all selected shapes
+        if ('color' in updates && updates.color !== undefined) {
+          handleBatchObjectUpdate(
+            selectedObjectIds.map((id) => ({ id, updates: { color: updates.color! } }))
+          );
+        }
       }
     },
-    [selectedObjectIds, handleObjectUpdate]
+    [selectedObjectIds, handleObjectUpdate, handleBatchObjectUpdate]
   );
 
   const handleClearBoard = useCallback(async () => {
     if (objects.length === 0) return;
     const ok = window.confirm('Clear the board? This will delete all objects for everyone in this board.');
     if (!ok) return;
-
-    const allObjects = [...objects];
+    pushAction({ type: 'delete', objects: [...objects] });
     setSelectedObjectIds([]);
     setContextMenu(null);
     setEditingObject(null);
     await clearObjects();
-    pushAction({ type: 'delete', objects: allObjects });
   }, [objects, clearObjects, pushAction]);
 
-  const handleLogout = useCallback(async () => {
-    await Promise.all([
-      cleanupPresence(),
-      cleanupCursor(),
-      cleanupTransform(),
-      cleanupEditing(),
-    ]);
-    await logout();
-  }, [cleanupPresence, cleanupCursor, cleanupTransform, cleanupEditing, logout]);
-
-  // --- Keyboard shortcuts for clipboard and undo/redo ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't intercept when editing text
+      if (editingObject) return;
       const active = document.activeElement;
       const isEditingInput =
         active &&
@@ -498,106 +627,122 @@ export function Board() {
           active.tagName === 'SELECT' ||
           (active as HTMLElement).isContentEditable);
       if (isEditingInput) return;
-      if (editingObject) return;
-
-      const mod = e.metaKey || e.ctrlKey;
-
-      // Ctrl+Z = Undo
-      if (e.key === 'z' && mod && !e.shiftKey) {
-        e.preventDefault();
-        undo();
-        return;
-      }
-
-      // Ctrl+Shift+Z or Ctrl+Y = Redo
-      if ((e.key === 'z' && mod && e.shiftKey) || (e.key === 'y' && mod)) {
-        e.preventDefault();
-        redo();
-        return;
-      }
-
-      // Ctrl+C = Copy
-      if (e.key === 'c' && mod && selectedObjectIds.length > 0) {
-        e.preventDefault();
-        handleCopySelected();
-        return;
-      }
-
-      // Ctrl+X = Cut
-      if (e.key === 'x' && mod && selectedObjectIds.length > 0) {
-        e.preventDefault();
-        handleCutSelected();
-        return;
-      }
-
-      // Ctrl+V = Paste
-      if (e.key === 'v' && mod && clipboardRef.current.length > 0) {
-        e.preventDefault();
-        handlePaste();
-        return;
-      }
-
-      // Ctrl+A = Select all
-      if (e.key === 'a' && mod) {
+      if (e.key === 'a' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         selectAll();
-        return;
       }
-
-      // Backspace/Delete = Delete selected (no clipboard)
-      if ((e.key === 'Backspace' || e.key === 'Delete') && selectedObjectIds.length > 0) {
+      if (e.key === 'c' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        handleDeleteSelected();
-        return;
+        handleCopySelected();
       }
-
-      // Ctrl+D = Duplicate selected
-      if (e.key === 'd' && mod && selectedObjectIds.length > 0) {
+      if (e.key === 'x' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        handleCutSelected();
+      }
+      if (e.key === 'v' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        handlePaste();
+      }
+      if (e.key === 'z' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      }
+      if (e.key === 'z' && (e.metaKey || e.ctrlKey) && e.shiftKey) {
+        e.preventDefault();
+        redo();
+      }
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        if (selectedObjectIds.length > 0) {
+          e.preventDefault();
+          handleDeleteSelected();
+        }
+      }
+      if (e.key === 'd' && (e.metaKey || e.ctrlKey) && selectedObjectIds.length > 0) {
         e.preventDefault();
         duplicateSelectedObjects();
-        return;
+      }
+      if (e.key === 'n' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        createObjectAtCenter('sticky');
+      }
+      if (e.key === 't' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        createObjectAtCenter('text');
       }
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedObjectIds, objects, editingObject, undo, redo, handleCopySelected, handleCutSelected, handleDeleteSelected, handlePaste, selectAll, duplicateSelectedObjects, pushAction]);
+  }, [
+    editingObject,
+    selectedObjectIds.length,
+    selectAll,
+    handleCopySelected,
+    handleCutSelected,
+    handlePaste,
+    handleDeleteSelected,
+    duplicateSelectedObjects,
+    undo,
+    redo,
+    createObjectAtCenter,
+  ]);
 
-  // Derive selected object for StylePanel (only when 1 selected)
-  const selectedObject = selectedObjectIds.length === 1
-    ? objects.find(obj => obj.id === selectedObjectIds[0]) || null
-    : null;
+  const handleLogout = useCallback(async () => {
+    await Promise.all([
+      cleanupPresence(),
+      cleanupCursor(),
+      cleanupTransform(),
+      cleanupEditing(),
+      cleanupSelection(),
+    ]);
+    await logout();
+  }, [cleanupPresence, cleanupCursor, cleanupTransform, cleanupEditing, cleanupSelection, logout]);
 
-  const contextMenuObject = contextMenu
-    ? objects.find((obj) => obj.id === contextMenu.objectId) || null
-    : null;
+  const selectedObject =
+    selectedObjectIds.length >= 1
+      ? objects.find((obj) => obj.id === selectedObjectIds[0]) || null
+      : null;
+  const contextMenuObject =
+    contextMenu?.objectId != null
+      ? objects.find((obj) => obj.id === contextMenu.objectId) || null
+      : null;
 
   return (
     <div className="board-container">
       <Toolbar
+        boardName={boardDisplayName}
+        onBoardNameChange={handleBoardNameChange}
         onLogout={handleLogout}
-        onUndo={undo}
-        onRedo={redo}
-        canUndo={canUndo}
-        canRedo={canRedo}
       />
       <div className="board-content">
         <ShapeSidebar
           onShapeClick={createObjectAtCenter}
+          onDragStateChange={setIsDraggingShapeFromSidebar}
         />
         <div className="board-main">
+          <UndoRedoClearPanel
+            onUndo={undo}
+            onRedo={redo}
+            canUndo={canUndo}
+            canRedo={canRedo}
+            onClear={handleClearBoard}
+            clearDisabled={objects.length === 0}
+          />
           <PresenceBar onlineUsers={onlineUsers} />
           <div
             ref={canvasContainerRef}
-            className="canvas-area"
+            className={`canvas-area${isDraggingShapeFromSidebar ? ' dragging-shape' : ''}`}
             style={{ position: 'relative' }}
             onDragOver={handleCanvasDragOver}
+            onDragEnter={handleCanvasDragEnter}
+            onDragLeave={handleCanvasDragLeave}
             onDrop={handleCanvasDrop}
             onContextMenu={(e) => e.preventDefault()}
           >
             <Canvas
               objects={objects}
               onObjectUpdate={handleObjectUpdate}
+              onBatchObjectUpdate={handleBatchObjectUpdate}
+              onObjectDelete={handleObjectDelete}
               onCanvasClick={handleCanvasClick}
               onCanvasRightClick={handleCanvasRightClick}
               onLastClickPosition={handleLastClickPosition}
@@ -621,65 +766,32 @@ export function Board() {
               remoteEditings={remoteEditings}
               onBroadcastTransform={broadcastTransform}
               onClearTransform={clearTransform}
+              isDraggingShapeFromSidebar={isDraggingShapeFromSidebar}
             />
-            <button
-              type="button"
-              className="tool-btn canvas-clear-btn"
-              onClick={handleClearBoard}
-              disabled={objects.length === 0}
-              aria-label="Clear board"
-              data-testid="clear-board-btn"
-            >
-              Clear
-            </button>
         {contextMenu && (
           <ContextMenu
             x={contextMenu.x}
             y={contextMenu.y}
             objectType={contextMenuObject?.type}
             onEditText={
-              contextMenuObject?.type === 'sticky' && contextMenuObject
+              contextMenuObject && (contextMenuObject.type === 'sticky' || contextMenuObject.type === 'text')
                 ? () => {
                     openTextEditorForObject(contextMenuObject);
                     setContextMenu(null);
                   }
                 : undefined
             }
-            onCopy={() => {
-              handleCopySelected();
-              setContextMenu(null);
-            }}
-            onCut={() => {
-              handleCutSelected();
-              setContextMenu(null);
-            }}
-            onPaste={() => {
-              handlePaste(contextMenu ? { x: contextMenu.pasteWorldX, y: contextMenu.pasteWorldY } : undefined);
-              setContextMenu(null);
-            }}
-            onDuplicate={() => {
-              duplicateSelectedObjects();
-              setContextMenu(null);
-            }}
-            onSelectAll={() => {
-              selectAll();
-              setContextMenu(null);
-            }}
-            onUndo={() => {
-              undo();
-              setContextMenu(null);
-            }}
-            onRedo={() => {
-              redo();
-              setContextMenu(null);
-            }}
+            onCopy={handleCopySelected}
+            onCut={handleCutSelected}
+            onPaste={() => handlePaste({ x: contextMenu.pasteWorldX, y: contextMenu.pasteWorldY })}
+            onDuplicate={duplicateSelectedObjects}
+            onSelectAll={selectAll}
+            onUndo={undo}
+            onRedo={redo}
             canUndo={canUndo}
             canRedo={canRedo}
             hasClipboardContent={clipboardCount > 0}
-            onDelete={() => {
-              handleDeleteSelected();
-              setContextMenu(null);
-            }}
+            onDelete={handleDeleteSelected}
             onClose={() => setContextMenu(null)}
           />
         )}
@@ -690,7 +802,8 @@ export function Board() {
             width={editingObject.width}
             height={editingObject.height}
             text={editingObject.text}
-            color={objects.find(obj => obj.id === editingObject.id)?.color}
+            color={editingObject.objectType === 'text' ? 'transparent' : objects.find(obj => obj.id === editingObject.id)?.color}
+            objectType={editingObject.objectType}
             onSubmit={handleTextSubmit}
             onCancel={() => {
               clearEditing();
@@ -714,8 +827,9 @@ export function Board() {
         )}
         {selectedObject && stylePanelOpen && (
           <StylePanel
-            key={selectedObject.id}
+            key={selectedObjectIds.join(',')}
             selectedObject={selectedObject}
+            selectedCount={selectedObjectIds.length}
             onUpdate={handleSelectedObjectUpdate}
             liveTransform={liveTransform}
             onCollapse={() => setStylePanelOpen(false)}

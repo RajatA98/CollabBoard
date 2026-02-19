@@ -3,6 +3,7 @@ import {
   createBoard as fbCreateBoard,
   joinBoard as fbJoinBoard,
   leaveBoard as fbLeaveBoard,
+  deleteBoard as fbDeleteBoard,
   onMyBoardsChange,
   onOpenBoardsChange,
 } from '../firebase/boardMeta';
@@ -62,9 +63,17 @@ export function useBoards(user: AppUser | null) {
     [user]
   );
 
+  const deleteBoard = useCallback(
+    async (boardId: string) => {
+      if (!user) throw new Error('Not authenticated');
+      await fbDeleteBoard(boardId);
+    },
+    [user]
+  );
+
   const joinableBoards = openBoards.filter(
     (b) => user && !b.members.includes(user.uid)
   );
 
-  return { myBoards, joinableBoards, loading, createBoard, joinBoard, leaveBoard };
+  return { myBoards, joinableBoards, loading, createBoard, joinBoard, leaveBoard, deleteBoard };
 }

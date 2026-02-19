@@ -10,6 +10,8 @@ interface UndoRedoCallbacks {
   addObject: (object: BoardObject) => Promise<void>;
   updateObject: (id: string, updates: Partial<BoardObject>) => Promise<void>;
   deleteObject: (id: string) => Promise<void>;
+  /** Called after applying or reversing an action (undo/redo). Use to e.g. close text editor. */
+  onApply?: () => void;
 }
 
 const MAX_STACK_SIZE = 50;
@@ -21,74 +23,79 @@ export function useUndoRedo(callbacks: UndoRedoCallbacks) {
 
   const pushAction = useCallback((action: UndoAction) => {
     if (isApplyingRef.current) return;
-    setUndoStack(prev => [...prev.slice(-MAX_STACK_SIZE + 1), action]);
+    setUndoStack((prev) => [...prev.slice(-MAX_STACK_SIZE + 1), action]);
     setRedoStack([]);
   }, []);
 
-  const applyAction = useCallback(async (action: UndoAction) => {
-    isApplyingRef.current = true;
-    try {
-      switch (action.type) {
-        case 'add':
-          await Promise.all(action.objects.map(obj => callbacks.addObject(obj)));
-          break;
-        case 'delete':
-          await Promise.all(action.objects.map(obj => callbacks.deleteObject(obj.id)));
-          break;
-        case 'update':
-          await Promise.all(
-            action.changes.map(change => callbacks.updateObject(change.id, change.after))
-          );
-          break;
+  const applyAction = useCallback(
+    async (action: UndoAction) => {
+      isApplyingRef.current = true;
+      try {
+        switch (action.type) {
+          case 'add':
+            await Promise.all(action.objects.map((obj) => callbacks.addObject(obj)));
+            break;
+          case 'delete':
+            await Promise.all(action.objects.map((obj) => callbacks.deleteObject(obj.id)));
+            break;
+          case 'update':
+            await Promise.all(
+              action.changes.map((change) => callbacks.updateObject(change.id, change.after))
+            );
+            break;
+        }
+        callbacks.onApply?.();
+      } finally {
+        isApplyingRef.current = false;
       }
-    } finally {
-      isApplyingRef.current = false;
-    }
-  }, [callbacks]);
+    },
+    [callbacks]
+  );
 
-  const reverseAction = useCallback(async (action: UndoAction) => {
-    isApplyingRef.current = true;
-    try {
-      switch (action.type) {
-        case 'add':
-          // Undo add = delete
-          await Promise.all(action.objects.map(obj => callbacks.deleteObject(obj.id)));
-          break;
-        case 'delete':
-          // Undo delete = re-add
-          await Promise.all(action.objects.map(obj => callbacks.addObject(obj)));
-          break;
-        case 'update':
-          // Undo update = apply 'before' values
-          await Promise.all(
-            action.changes.map(change => callbacks.updateObject(change.id, change.before))
-          );
-          break;
+  const reverseAction = useCallback(
+    async (action: UndoAction) => {
+      isApplyingRef.current = true;
+      try {
+        switch (action.type) {
+          case 'add':
+            await Promise.all(action.objects.map((obj) => callbacks.deleteObject(obj.id)));
+            break;
+          case 'delete':
+            await Promise.all(action.objects.map((obj) => callbacks.addObject(obj)));
+            break;
+          case 'update':
+            await Promise.all(
+              action.changes.map((change) => callbacks.updateObject(change.id, change.before))
+            );
+            break;
+        }
+        callbacks.onApply?.();
+      } finally {
+        isApplyingRef.current = false;
       }
-    } finally {
-      isApplyingRef.current = false;
-    }
-  }, [callbacks]);
+    },
+    [callbacks]
+  );
 
   const undo = useCallback(async () => {
-    setUndoStack(prev => {
+    setUndoStack((prev) => {
       if (prev.length === 0) return prev;
       const action = prev[prev.length - 1];
       const newStack = prev.slice(0, -1);
       reverseAction(action).then(() => {
-        setRedoStack(rPrev => [...rPrev, action]);
+        setRedoStack((rPrev) => [...rPrev, action]);
       });
       return newStack;
     });
   }, [reverseAction]);
 
   const redo = useCallback(async () => {
-    setRedoStack(prev => {
+    setRedoStack((prev) => {
       if (prev.length === 0) return prev;
       const action = prev[prev.length - 1];
       const newStack = prev.slice(0, -1);
       applyAction(action).then(() => {
-        setUndoStack(uPrev => [...uPrev, action]);
+        setUndoStack((uPrev) => [...uPrev, action]);
       });
       return newStack;
     });
