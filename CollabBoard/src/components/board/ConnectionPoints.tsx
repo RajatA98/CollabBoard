@@ -1,60 +1,91 @@
-import { Circle } from 'react-konva';
+import { Line, Rect, Group } from 'react-konva';
 import { getConnectionPoints } from '../../utils/connectionPoints';
 import type { BoardObject } from '../../types';
 
+const X_HALF = 6;
+
 interface ConnectionPointsProps {
   object: BoardObject;
-  /** The point id of the source anchor if this shape is the pending-connection source */
-  pendingSourcePointId: string | null;
-  /** True when any connection is pending (affects colours) */
-  hasPendingConnection: boolean;
-  /** True while dragging a line endpoint — disables pointer events so the dots don't steal drag */
+  /** The point id of the source anchor when a connection drag is active from this shape */
+  activeSourcePointId: string | null;
+  /** True when a connection drag is in progress (affects styling of target Xs) */
+  hasActiveConnection: boolean;
+  /** True while dragging a line endpoint -- disables pointer events so Xs don't steal drag */
   ignorePointer?: boolean;
-  /** Called on double-click to start a connection from this dot */
-  onConnectStart: (shapeId: string, pointId: string) => void;
-  /** Called on single-click when a pending connection exists — completes the connection */
-  onConnectEnd: (shapeId: string, pointId: string) => void;
+  /** Called on mousedown to start dragging a connection from this X */
+  onConnectionDragStart: (shapeId: string, pointId: string, x: number, y: number) => void;
+  /** Called on mouseup over a target X to complete a connection */
+  onConnectionDragEnd: (shapeId: string, pointId: string) => void;
+  /** Called on double-click to detach any line connected to this point */
+  onDetachConnection?: (shapeId: string, pointId: string) => void;
 }
 
 export function ConnectionPoints({
   object,
-  pendingSourcePointId,
-  hasPendingConnection,
+  activeSourcePointId,
+  hasActiveConnection,
   ignorePointer = false,
-  onConnectStart,
-  onConnectEnd,
+  onConnectionDragStart,
+  onConnectionDragEnd,
+  onDetachConnection,
 }: ConnectionPointsProps) {
   const points = getConnectionPoints(object);
 
   return (
     <>
       {points.map((pt) => {
-        const isSource = pendingSourcePointId === pt.id;
-        const isTarget = hasPendingConnection && !isSource;
+        const isSource = activeSourcePointId === pt.id;
+        const isTarget = hasActiveConnection && !isSource;
+        const strokeColor = isSource ? '#ff6b00' : '#4285f4';
+        const scale = isSource ? 1.3 : 1;
 
         return (
-          <Circle
-            key={`${object.id}-${pt.id}`}
-            x={pt.x}
-            y={pt.y}
-            radius={isSource ? 7 : 5}
-            fill={isSource ? '#ff6b00' : isTarget ? '#4285f4' : 'white'}
-            stroke={isSource ? '#ff6b00' : '#4285f4'}
-            strokeWidth={2}
-            listening={!ignorePointer}
-            onDblClick={() => onConnectStart(object.id, pt.id)}
-            onDblTap={() => onConnectStart(object.id, pt.id)}
-            onClick={() => {
-              if (hasPendingConnection && !isSource) {
-                onConnectEnd(object.id, pt.id);
-              }
-            }}
-            onTap={() => {
-              if (hasPendingConnection && !isSource) {
-                onConnectEnd(object.id, pt.id);
-              }
-            }}
-          />
+          <Group key={`${object.id}-${pt.id}`} x={pt.x} y={pt.y} scaleX={scale} scaleY={scale}>
+            {/* Invisible hit rect for easy targeting */}
+            <Rect
+              x={-X_HALF - 4}
+              y={-X_HALF - 4}
+              width={(X_HALF + 4) * 2}
+              height={(X_HALF + 4) * 2}
+              fill="transparent"
+              listening={!ignorePointer}
+              onMouseDown={(e) => {
+                e.cancelBubble = true;
+                onConnectionDragStart(object.id, pt.id, pt.x, pt.y);
+              }}
+              onTouchStart={(e) => {
+                e.cancelBubble = true;
+                onConnectionDragStart(object.id, pt.id, pt.x, pt.y);
+              }}
+              onMouseUp={() => {
+                if (isTarget) onConnectionDragEnd(object.id, pt.id);
+              }}
+              onTouchEnd={() => {
+                if (isTarget) onConnectionDragEnd(object.id, pt.id);
+              }}
+              onDblClick={() => {
+                onDetachConnection?.(object.id, pt.id);
+              }}
+              onDblTap={() => {
+                onDetachConnection?.(object.id, pt.id);
+              }}
+            />
+            {/* X mark: two crossing lines */}
+            <Line
+              points={[-X_HALF, -X_HALF, X_HALF, X_HALF]}
+              stroke={strokeColor}
+              strokeWidth={2.5}
+              lineCap="round"
+              listening={false}
+            />
+            <Line
+              points={[X_HALF, -X_HALF, -X_HALF, X_HALF]}
+              stroke={strokeColor}
+              strokeWidth={2.5}
+              lineCap="round"
+              listening={false}
+            />
+          </Group>
         );
       })}
     </>

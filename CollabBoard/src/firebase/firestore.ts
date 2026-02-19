@@ -3,6 +3,7 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  deleteField,
   serverTimestamp,
   collection,
   getDocs,
@@ -29,10 +30,15 @@ export async function addObject(boardId: string, object: BoardObject) {
 
 export async function updateObject(boardId: string, objectId: string, updates: Partial<BoardObject>) {
   const ref = doc(db, 'boards', boardId, 'objects', objectId);
-  await updateDoc(ref, {
-    ...updates,
-    updatedAt: serverTimestamp(),
-  });
+  const payload: Record<string, unknown> = { updatedAt: serverTimestamp() };
+  for (const [key, value] of Object.entries(updates)) {
+    if (value === undefined) {
+      payload[key] = deleteField();
+    } else {
+      payload[key] = value;
+    }
+  }
+  await updateDoc(ref, payload);
 }
 
 export async function deleteObject(boardId: string, objectId: string) {
