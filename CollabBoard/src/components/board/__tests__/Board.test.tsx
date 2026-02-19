@@ -116,7 +116,8 @@ vi.mock('../TextEditor', () => ({
 vi.mock('../Toolbar', () => ({ Toolbar: () => <div>Toolbar</div> }));
 vi.mock('../PresenceBar', () => ({ PresenceBar: () => <div>PresenceBar</div> }));
 vi.mock('../ShapeSidebar', () => ({ ShapeSidebar: () => <div>ShapeSidebar</div> }));
-vi.mock('../StylePanel', () => ({ StylePanel: () => null }));
+vi.mock('../FloatingToolbar', () => ({ FloatingToolbar: () => null }));
+vi.mock('../StyleBar', () => ({ StyleBar: () => null }));
 vi.mock('../ContextMenu', () => ({ ContextMenu: () => null }));
 
 describe('Board', () => {

@@ -59,8 +59,8 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
     const neededTextHeight = measureTextHeight({
       text: displayText,
       width: textWidth,
-      fontSize: STICKY_FONT_SIZE,
-      fontFamily: STICKY_FONT_FAMILY,
+      fontSize: object.fontSize || STICKY_FONT_SIZE,
+      fontFamily: object.fontFamily || STICKY_FONT_FAMILY,
     });
 
     const requiredHeight = Math.max(
@@ -113,7 +113,7 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
         y={6}
         fontSize={12}
         fontFamily="'Segoe UI', system-ui, sans-serif"
-        fill="#666"
+        fill={object.textColor ?? '#333'}
         fontStyle="bold"
       />
       {/* Text content */}
@@ -122,10 +122,17 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
         width={object.width - 16}
         x={8}
         y={26}
-        fontSize={16}
-        fontFamily="'Segoe Print', 'Comic Sans MS', cursive"
-        fill={remoteEditing ? '#333' : (object.text ? '#333' : '#999')}
-        fontStyle={remoteEditing ? 'normal' : (object.text ? 'normal' : 'italic')}
+        fontSize={object.fontSize || STICKY_FONT_SIZE}
+        fontFamily={object.fontFamily || STICKY_FONT_FAMILY}
+        fill={object.textColor ?? (remoteEditing ? '#333' : (object.text ? '#333' : '#999'))}
+        fontStyle={
+          remoteEditing
+            ? 'normal'
+            : object.text
+              ? [object.bold && 'bold', object.italic && 'italic'].filter(Boolean).join(' ') || 'normal'
+              : 'italic'
+        }
+        textDecoration={object.underline ? 'underline' : ''}
         opacity={remoteEditing ? 0.7 : 1}
         align="left"
         verticalAlign="top"

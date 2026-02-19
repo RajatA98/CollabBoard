@@ -7,13 +7,19 @@ interface TextEditorProps {
   height: number;
   text: string;
   color?: string;
+  textColor?: string;
   objectType?: 'sticky' | 'text' | 'frame';
+  fontSize?: number;
+  fontFamily?: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
   onSubmit: (text: string) => void;
   onCancel: () => void;
   onTextChange?: (text: string) => void;
 }
 
-export function TextEditor({ x, y, width, height, text, color = '#FFD54F', objectType = 'sticky', onSubmit, onCancel, onTextChange }: TextEditorProps) {
+export function TextEditor({ x, y, width, height, text, color = '#FFD54F', textColor, objectType = 'sticky', fontSize, fontFamily, bold, italic, underline, onSubmit, onCancel, onTextChange }: TextEditorProps) {
   const [value, setValue] = useState(text);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [textareaHeight, setTextareaHeight] = useState(height);
@@ -65,13 +71,15 @@ export function TextEditor({ x, y, width, height, text, color = '#FFD54F', objec
         width,
         height: isFrameType ? height : textareaHeight,
         padding: isFrameType ? '2px 8px' : '8px',
-        fontSize: isFrameType ? '13px' : '16px',
+        fontSize: isFrameType ? '13px' : `${fontSize || 16}px`,
         fontFamily: isFrameType
           ? "system-ui, sans-serif"
-          : isTextType
+          : fontFamily || (isTextType
             ? "'Segoe UI', system-ui, sans-serif"
-            : "'Segoe Print', 'Comic Sans MS', cursive",
-        fontWeight: isFrameType ? 'bold' : 'normal',
+            : "'Segoe Print', 'Comic Sans MS', cursive"),
+        fontWeight: isFrameType ? 'bold' : (bold ? 'bold' : 'normal'),
+        fontStyle: isFrameType ? 'normal' : (italic ? 'italic' : 'normal'),
+        textDecoration: isFrameType ? 'none' : (underline ? 'underline' : 'none'),
         border: isFrameType
           ? '2px solid #3366ff'
           : isTextType
@@ -81,7 +89,7 @@ export function TextEditor({ x, y, width, height, text, color = '#FFD54F', objec
         resize: 'none',
         outline: 'none',
         background: isFrameType ? '#3366ff' : isTextType ? 'rgba(255,255,255,0.95)' : color,
-        color: isFrameType ? '#ffffff' : '#333',
+        color: isFrameType ? '#ffffff' : (textColor ?? '#333'),
         zIndex: 1000,
         boxShadow: isFrameType
           ? '0 2px 8px rgba(0,0,0,0.2)'

@@ -37,6 +37,18 @@ function normalizeBoardObject(raw: Record<string, unknown>, id: string): BoardOb
     fromPoint: raw.fromPoint != null ? str(raw.fromPoint, '') : undefined,
     toId: raw.toId != null ? str(raw.toId, '') : undefined,
     toPoint: raw.toPoint != null ? str(raw.toPoint, '') : undefined,
+    // Optional text/shape styling (preserved from Firestore)
+    textColor: raw.textColor != null ? str(raw.textColor, '#333333') : undefined,
+    fontSize: raw.fontSize != null ? num(raw.fontSize, 16) : undefined,
+    fontFamily: raw.fontFamily != null ? str(raw.fontFamily, '') : undefined,
+    bold: raw.bold != null ? !!raw.bold : undefined,
+    italic: raw.italic != null ? !!raw.italic : undefined,
+    underline: raw.underline != null ? !!raw.underline : undefined,
+    strokeColor: raw.strokeColor != null ? str(raw.strokeColor, '#ccc') : undefined,
+    strokeWidth: raw.strokeWidth != null ? num(raw.strokeWidth, 1) : undefined,
+    lineStyle: raw.lineStyle != null && ['solid', 'dashed', 'dotted'].includes(String(raw.lineStyle))
+      ? (raw.lineStyle as BoardObject['lineStyle'])
+      : undefined,
   };
 }
 

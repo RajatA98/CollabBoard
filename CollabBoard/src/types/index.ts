@@ -17,6 +17,17 @@ export interface BoardObject {
   createdAt: number;
   updatedAt: number;
   updatedBy: string;
+  // Text formatting fields (for sticky notes and text elements)
+  fontSize?: number;
+  fontFamily?: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  textColor?: string;
+  // Stroke / border fields (shapes & lines)
+  strokeColor?: string;
+  strokeWidth?: number;
+  lineStyle?: 'solid' | 'dashed' | 'dotted';
   // Line-specific fields
   arrowType?: 'none' | 'single' | 'double';
   waypoints?: Waypoint[];

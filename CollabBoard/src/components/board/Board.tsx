@@ -6,7 +6,7 @@ import { TextEditor } from './TextEditor';
 import { PresenceBar } from './PresenceBar';
 import { ShapeSidebar } from './ShapeSidebar';
 import { UndoRedoClearPanel } from './UndoRedoClearPanel';
-import { StylePanel } from './StylePanel';
+import { StyleBar } from './StyleBar';
 import { ContextMenu } from './ContextMenu';
 import { useAuth } from '../../hooks/useAuth';
 import { useBoardObjects } from '../../hooks/useBoardObjects';
@@ -64,7 +64,6 @@ export function Board() {
     text: string;
     objectType: 'sticky' | 'text' | 'frame';
   } | null>(null);
-  const [stylePanelOpen, setStylePanelOpen] = useState(false);
   const [shapesPanelOpen, setShapesPanelOpen] = useState(false);
   const [boardMeta, setBoardMeta] = useState<BoardMeta | null>(null);
   const [isDraggingShapeFromSidebar, setIsDraggingShapeFromSidebar] = useState(false);
@@ -832,12 +831,10 @@ export function Board() {
       if (selectedObjectIds.length === 1) {
         handleObjectUpdate(selectedObjectIds[0], updates);
       } else {
-        // Multi-select: apply color to all selected shapes
-        if ('color' in updates && updates.color !== undefined) {
-          handleBatchObjectUpdate(
-            selectedObjectIds.map((id) => ({ id, updates: { color: updates.color! } }))
-          );
-        }
+        // Multi-select: apply all updates to all selected objects
+        handleBatchObjectUpdate(
+          selectedObjectIds.map((id) => ({ id, updates }))
+        );
       }
     },
     [selectedObjectIds, handleObjectUpdate, handleBatchObjectUpdate]
@@ -911,17 +908,40 @@ export function Board() {
         e.preventDefault();
         createObjectAtCenter('frame');
       }
+      if (e.key === 'b' && (e.metaKey || e.ctrlKey) && selectedObjectIds.length > 0) {
+        e.preventDefault();
+        const obj = objects.find((o) => o.id === selectedObjectIds[0]);
+        if (obj && (obj.type === 'sticky' || obj.type === 'text')) {
+          handleSelectedObjectUpdate({ bold: !obj.bold });
+        }
+      }
+      if (e.key === 'i' && (e.metaKey || e.ctrlKey) && selectedObjectIds.length > 0) {
+        e.preventDefault();
+        const obj = objects.find((o) => o.id === selectedObjectIds[0]);
+        if (obj && (obj.type === 'sticky' || obj.type === 'text')) {
+          handleSelectedObjectUpdate({ italic: !obj.italic });
+        }
+      }
+      if (e.key === 'u' && (e.metaKey || e.ctrlKey) && selectedObjectIds.length > 0) {
+        e.preventDefault();
+        const obj = objects.find((o) => o.id === selectedObjectIds[0]);
+        if (obj && (obj.type === 'sticky' || obj.type === 'text')) {
+          handleSelectedObjectUpdate({ underline: !obj.underline });
+        }
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
     editingObject,
-    selectedObjectIds.length,
+    selectedObjectIds,
+    objects,
     selectAll,
     handleCopySelected,
     handleCutSelected,
     handlePaste,
     handleDeleteSelected,
+    handleSelectedObjectUpdate,
     duplicateSelectedObjects,
     undo,
     redo,
@@ -1015,6 +1035,17 @@ export function Board() {
               onDragStart={markDragging}
               onDragEnd={unmarkDragging}
             />
+        {selectedObject && (
+          <StyleBar
+            key={selectedObjectIds.join(',')}
+            selectedObject={selectedObject}
+            selectedCount={selectedObjectIds.length}
+            onUpdate={handleSelectedObjectUpdate}
+            onDelete={handleDeleteSelected}
+            liveTransform={liveTransform}
+            viewport={viewport}
+          />
+        )}
         {contextMenu && (
           <ContextMenu
             x={contextMenu.x}
@@ -1047,46 +1078,34 @@ export function Board() {
             onClose={() => setContextMenu(null)}
           />
         )}
-        {editingObject && (
-          <TextEditor
-            x={editingObject.x}
-            y={editingObject.y}
-            width={editingObject.width}
-            height={editingObject.height}
-            text={editingObject.text}
-            color={editingObject.objectType === 'text' ? 'transparent' : objects.find(obj => obj.id === editingObject.id)?.color}
-            objectType={editingObject.objectType}
-            onSubmit={handleTextSubmit}
-            onCancel={() => {
-              clearEditing();
-              setEditingObject(null);
-            }}
-            onTextChange={(text) => editingObject && broadcastEditing(editingObject.id, text)}
-          />
-        )}
+        {editingObject && (() => {
+          const editObj = objects.find(obj => obj.id === editingObject.id);
+          return (
+            <TextEditor
+              x={editingObject.x}
+              y={editingObject.y}
+              width={editingObject.width}
+              height={editingObject.height}
+              text={editingObject.text}
+              color={editingObject.objectType === 'text' ? 'transparent' : editObj?.color}
+              textColor={editObj?.textColor}
+              objectType={editingObject.objectType}
+              fontSize={editObj?.fontSize}
+              fontFamily={editObj?.fontFamily}
+              bold={editObj?.bold}
+              italic={editObj?.italic}
+              underline={editObj?.underline}
+              onSubmit={handleTextSubmit}
+              onCancel={() => {
+                clearEditing();
+                setEditingObject(null);
+              }}
+              onTextChange={(text) => editingObject && broadcastEditing(editingObject.id, text)}
+            />
+          );
+        })()}
           </div>
         </div>
-        {selectedObject && !stylePanelOpen && (
-          <button
-            type="button"
-            className="style-panel-tab"
-            onClick={() => setStylePanelOpen(true)}
-            aria-label="Open style panel"
-            data-testid="style-panel-tab"
-          >
-            <span className="style-panel-tab-arrow" aria-hidden>‹</span>
-          </button>
-        )}
-        {selectedObject && stylePanelOpen && (
-          <StylePanel
-            key={selectedObjectIds.join(',')}
-            selectedObject={selectedObject}
-            selectedCount={selectedObjectIds.length}
-            onUpdate={handleSelectedObjectUpdate}
-            liveTransform={liveTransform}
-            onCollapse={() => setStylePanelOpen(false)}
-          />
-        )}
       </div>
     </div>
   );
