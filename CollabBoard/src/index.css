@@ -490,15 +490,14 @@ html, body, #root {
   position: absolute;
   left: calc(100% + 12px);
   top: 0;
-  padding: 12px;
+  padding: 8px;
   background: #fff;
   border-radius: 12px;
   box-shadow: 0 2px 16px rgba(0, 0, 0, 0.12);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, 56px);
+  gap: 6px;
   z-index: 99;
-  min-width: 120px;
 }
 
 .shape-panel-item {
