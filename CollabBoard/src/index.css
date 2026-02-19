@@ -195,6 +195,7 @@ html, body, #root {
 .toolbar-actions {
   display: flex;
   gap: 4px;
+  margin-left: auto;
 }
 
 .toolbar-shortcut {

@@ -1,15 +1,38 @@
 import React, { useRef, useCallback, useEffect, useState, useMemo } from 'react';
-import { Stage, Layer, Transformer } from 'react-konva';
+import { Stage, Layer, Transformer, Circle as KonvaCircle, Rect as KonvaRect, Line as KonvaLine } from 'react-konva';
 import type Konva from 'konva';
 import { GridBackground } from './GridBackground';
 import { StickyNote } from './StickyNote';
 import { Rectangle } from './Rectangle';
+import { Circle } from './Circle';
+import { LineShape, buildLinePointObjects } from './LineShape';
+import { ConnectionPoints } from './ConnectionPoints';
 import { TextElement } from './TextElement';
 import { RemoteCursor } from './RemoteCursor';
 import { DimensionLabel } from './DimensionLabel';
 import { SelectionRect } from './SelectionRect';
 import { rectsIntersect } from '../../utils/coordinates';
-import type { BoardObject, CursorData, LiveTransformData, LiveEditingData } from '../../types';
+import { getConnectionPoints, getConnectionPointById } from '../../utils/connectionPoints';
+import type { Direction } from '../../utils/connectionPoints';
+import { routeOrthogonal } from '../../utils/routing';
+import type { BoardObject, CursorData, LiveTransformData, LiveEditingData, Waypoint } from '../../types';
+
+const SNAP_RADIUS = 32;
+
+interface LineOverride {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  waypoints?: Waypoint[];
+}
+
+interface SnapCandidate {
+  shapeId: string;
+  pointId: string;
+  x: number;
+  y: number;
+}
 
 interface CanvasProps {
   objects: BoardObject[];
@@ -47,6 +70,14 @@ interface CanvasProps {
   onClearTransform?: () => void;
   /** When true, stage panning is disabled so HTML5 drop from sidebar is not stolen. */
   isDraggingShapeFromSidebar?: boolean;
+  /** Called when user drag-connects shapes via connection X marks. toId/toPoint are empty for free-ended lines. */
+  onConnectShapes?: (
+    fromId: string, fromPoint: string,
+    toId: string, toPoint: string,
+    startX: number, startY: number,
+    endX: number, endY: number,
+    waypoints: Waypoint[],
+  ) => void;
 }
 
 const ZOOM_SPEED = 1.05;
@@ -82,6 +113,7 @@ export function Canvas({
   onBroadcastTransform,
   onClearTransform,
   isDraggingShapeFromSidebar = false,
+  onConnectShapes,
 }: CanvasProps) {
   const stageRef = useRef<Konva.Stage>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
@@ -109,6 +141,35 @@ export function Canvas({
   const [isMarqueeSelecting, setIsMarqueeSelecting] = useState(false);
   const [marqueeStart, setMarqueeStart] = useState<{ x: number; y: number } | null>(null);
   const [marqueeEnd, setMarqueeEnd] = useState<{ x: number; y: number } | null>(null);
+  const marqueeStartRef = useRef<{ x: number; y: number } | null>(null);
+  const marqueeEndRef = useRef<{ x: number; y: number } | null>(null);
+
+  // ── Connection & line handle state ──────────────────────────────────────
+  const [hoveredShapeId, setHoveredShapeId] = useState<string | null>(null);
+  const [lineOverrides, setLineOverrides] = useState<Record<string, LineOverride>>({});
+  const [snapHighlight, setSnapHighlight] = useState<{ x: number; y: number } | null>(null);
+  const [isDraggingEndpoint, setIsDraggingEndpoint] = useState(false);
+  const snapCandidateRef = useRef<SnapCandidate | null>(null);
+  const draggingEndpointRef = useRef<'start' | 'end' | null>(null);
+
+  // ── Drag-to-connect state ──────────────────────────────────────────────
+  const [drawingConnection, setDrawingConnection] = useState<{
+    fromShapeId: string; fromPointId: string;
+    fromX: number; fromY: number;
+    toX: number; toY: number;
+  } | null>(null);
+  const drawingConnectionRef = useRef<typeof drawingConnection>(null);
+  const drawingSnapRef = useRef<SnapCandidate | null>(null);
+
+  const [isDraggingNode, setIsDraggingNode] = useState(false);
+
+  // Selected line (only when single selection of a line)
+  const selectedLine = selectedObjectIds.length === 1
+    ? objects.find(o => o.id === selectedObjectIds[0] && o.type === 'line') ?? null
+    : null;
+  const effectiveSelectedLine: BoardObject | null = selectedLine
+    ? (lineOverrides[selectedLine.id] ? { ...selectedLine, ...lineOverrides[selectedLine.id] } : selectedLine)
+    : null;
 
   const getWorldPointer = useCallback(() => {
     const stage = stageRef.current;
@@ -197,10 +258,17 @@ export function Canvas({
         };
         return;
       }
-      if (e.target !== stageRef.current) return;
+      // Allow marquee when clicking on empty area: Stage or Layer (Konva often hits Layer, not Stage)
+      const stage = e.target.getStage();
+      const target = e.target;
+      const isStage = target === stage;
+      const isLayer = (target as Konva.Node).getClassName?.() === 'Layer';
+      if (!isStage && !isLayer) return;
       if (e.evt.button !== 0) return;
       const worldPos = getWorldPointer();
       if (!worldPos) return;
+      marqueeStartRef.current = worldPos;
+      marqueeEndRef.current = worldPos;
       setIsMarqueeSelecting(true);
       setMarqueeStart(worldPos);
       setMarqueeEnd(worldPos);
@@ -216,10 +284,52 @@ export function Canvas({
       }
       if (isMarqueeSelecting) {
         const worldPos = getWorldPointer();
-        if (worldPos) setMarqueeEnd(worldPos);
+        if (worldPos) {
+          marqueeEndRef.current = worldPos;
+          setMarqueeEnd(worldPos);
+        }
+      }
+      // Update drawing connection line to follow cursor
+      if (drawingConnectionRef.current) {
+        const worldPos = getWorldPointer();
+        if (worldPos) {
+          const snap = findNearestSnapForConnect(worldPos.x, worldPos.y, drawingConnectionRef.current.fromShapeId);
+          if (snap) {
+            drawingSnapRef.current = snap;
+            setSnapHighlight({ x: snap.x, y: snap.y });
+            setDrawingConnection(prev => prev ? { ...prev, toX: snap.x, toY: snap.y } : null);
+            drawingConnectionRef.current = drawingConnectionRef.current ? { ...drawingConnectionRef.current, toX: snap.x, toY: snap.y } : null;
+          } else {
+            drawingSnapRef.current = null;
+            setSnapHighlight(null);
+            setDrawingConnection(prev => prev ? { ...prev, toX: worldPos.x, toY: worldPos.y } : null);
+            drawingConnectionRef.current = drawingConnectionRef.current ? { ...drawingConnectionRef.current, toX: worldPos.x, toY: worldPos.y } : null;
+          }
+        }
+        return;
+      }
+      // Hover detection for connection point overlays
+      const stage = stageRef.current;
+      if (stage) {
+        const pointer = stage.getPointerPosition();
+        if (pointer) {
+          const target = stage.getIntersection(pointer);
+          if (target) {
+            let node: Konva.Node | null = target;
+            while (node && node !== stage) {
+              const nid = node.id?.() ?? '';
+              if (nid) {
+                const found = objects.find(o => o.id === nid);
+                if (found) { setHoveredShapeId(found.id); return; }
+              }
+              node = node.parent;
+            }
+          }
+          setHoveredShapeId(null);
+        }
       }
     },
-    [onMouseMove, getWorldPointer, isMarqueeSelecting]
+    [onMouseMove, getWorldPointer, isMarqueeSelecting, objects, drawingConnection]
   );
 
   const handleStageMouseUp = useCallback(
@@ -228,11 +338,31 @@ export function Canvas({
         setIsMiddleMouseDown(false);
         return;
       }
-      if (!isMarqueeSelecting || !marqueeStart || !marqueeEnd) return;
-      const minX = Math.min(marqueeStart.x, marqueeEnd.x);
-      const minY = Math.min(marqueeStart.y, marqueeEnd.y);
-      const width = Math.abs(marqueeEnd.x - marqueeStart.x);
-      const height = Math.abs(marqueeEnd.y - marqueeStart.y);
+      // Marquee finalization is handled by window mouseup so we get it even when releasing over a shape
+      if (e.evt.button === 0 && isMarqueeSelecting) return;
+    },
+    [isMarqueeSelecting]
+  );
+
+  // Window mouseup ensures marquee selection finalizes even when releasing over a shape (Stage may not get the event)
+  useEffect(() => {
+    if (!isMarqueeSelecting) return;
+    const onWindowMouseUp = (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      const start = marqueeStartRef.current;
+      const end = marqueeEndRef.current;
+      if (!start || !end) {
+        setIsMarqueeSelecting(false);
+        setMarqueeStart(null);
+        setMarqueeEnd(null);
+        marqueeStartRef.current = null;
+        marqueeEndRef.current = null;
+        return;
+      }
+      const minX = Math.min(start.x, end.x);
+      const minY = Math.min(start.y, end.y);
+      const width = Math.abs(end.x - start.x);
+      const height = Math.abs(end.y - start.y);
       if (width > 5 || height > 5) {
         const marqueeRect = { x: minX, y: minY, width, height };
         const hitIds = objects
@@ -249,15 +379,20 @@ export function Canvas({
         onClearSelection();
         onCanvasClick();
       }
+      marqueeStartRef.current = null;
+      marqueeEndRef.current = null;
       setIsMarqueeSelecting(false);
       setMarqueeStart(null);
       setMarqueeEnd(null);
-    },
-    [isMarqueeSelecting, marqueeStart, marqueeEnd, objects, onSetSelectedIds, onClearSelection, onCanvasClick]
-  );
+    };
+    window.addEventListener('mouseup', onWindowMouseUp);
+    return () => window.removeEventListener('mouseup', onWindowMouseUp);
+  }, [isMarqueeSelecting, objects, onSetSelectedIds, onClearSelection, onCanvasClick]);
 
   const handleObjectDragStart = useCallback(
     (draggedId: string) => {
+      setIsDraggingNode(true);
+      setHoveredShapeId(null);
       if (selectedObjectIds.includes(draggedId) && selectedObjectIds.length > 1) {
         const stage = stageRef.current;
         if (!stage) return;
@@ -310,23 +445,76 @@ export function Canvas({
       if (!startPos) return;
       const dx = finalX - startPos.x;
       const dy = finalY - startPos.y;
-      if (onBatchObjectUpdate) {
-        const changes = selectedObjectIds
-          .map((id) => {
-            const pos = positions.get(id);
-            return pos ? { id, updates: { x: pos.x + dx, y: pos.y + dy } as Partial<BoardObject> } : null;
-          })
-          .filter((c): c is { id: string; updates: Partial<BoardObject> } => c !== null);
-        if (changes.length > 0) onBatchObjectUpdate(changes);
+
+      const selectedIdsSet = new Set(selectedObjectIds);
+      const buildVirtualShape = (obj: BoardObject): BoardObject => {
+        const pos = positions.get(obj.id);
+        if (pos && selectedIdsSet.has(obj.id)) {
+          return { ...obj, x: pos.x + dx, y: pos.y + dy };
+        }
+        return obj;
+      };
+
+      const changes: { id: string; updates: Partial<BoardObject> }[] = [];
+      for (const id of selectedObjectIds) {
+        const pos = positions.get(id);
+        if (!pos) continue;
+        const obj = objects.find(o => o.id === id);
+        if (!obj) continue;
+
+        const newX = pos.x + dx;
+        const newY = pos.y + dy;
+
+        if (obj.type === 'line') {
+          if (obj.fromId || obj.toId) {
+            const fromShapeRaw = obj.fromId ? objects.find(o => o.id === obj.fromId) : null;
+            const toShapeRaw = obj.toId ? objects.find(o => o.id === obj.toId) : null;
+            const fromShape = fromShapeRaw ? buildVirtualShape(fromShapeRaw) : null;
+            const toShape = toShapeRaw ? buildVirtualShape(toShapeRaw) : null;
+            const oldStart = { x: obj.x, y: obj.y };
+            const oldEnd = { x: obj.x + obj.width, y: obj.y + obj.height };
+            let startPt = { ...oldStart };
+            let startDir: Direction = 'right';
+            let endPt = { ...oldEnd };
+            let endDir: Direction = 'left';
+            if (obj.fromId && obj.fromPoint && fromShape) {
+              const cp = getConnectionPointById(fromShape, obj.fromPoint);
+              if (cp) { startPt = cp; startDir = cp.direction; }
+            }
+            if (obj.toId && obj.toPoint && toShape) {
+              const cp = getConnectionPointById(toShape, obj.toPoint);
+              if (cp) { endPt = cp; endDir = cp.direction; }
+            }
+            const deltaFrom = { x: startPt.x - oldStart.x, y: startPt.y - oldStart.y };
+            const deltaTo = { x: endPt.x - oldEnd.x, y: endPt.y - oldEnd.y };
+            const hasCustomBends = (obj.waypoints?.length ?? 0) > 0;
+            const waypoints = hasCustomBends
+              ? (obj.waypoints ?? []).map(w => ({ x: w.x + deltaFrom.x + deltaTo.x, y: w.y + deltaFrom.y + deltaTo.y }))
+              : routeOrthogonal(startPt, startDir, endPt, endDir, objects.map(o => buildVirtualShape(o)), [obj.fromId, obj.toId, obj.id].filter(Boolean) as string[]);
+            changes.push({ id, updates: { x: startPt.x, y: startPt.y, width: endPt.x - startPt.x, height: endPt.y - startPt.y, waypoints } });
+          } else {
+            changes.push({
+              id,
+              updates: {
+                x: newX,
+                y: newY,
+                waypoints: (obj.waypoints ?? []).map(w => ({ x: w.x + dx, y: w.y + dy })),
+              },
+            });
+          }
+        } else {
+          changes.push({ id, updates: { x: newX, y: newY } });
+        }
+      }
+
+      if (onBatchObjectUpdate && changes.length > 0) {
+        onBatchObjectUpdate(changes);
       } else {
-        selectedObjectIds.forEach((id) => {
-          const pos = positions.get(id);
-          if (pos) onObjectUpdate(id, { x: pos.x + dx, y: pos.y + dy });
-        });
+        changes.forEach(({ id, updates }) => onObjectUpdate(id, updates));
       }
       dragStartPositionsRef.current = null;
     },
-    [selectedObjectIds, onObjectUpdate, onBatchObjectUpdate]
+    [selectedObjectIds, objects, onObjectUpdate, onBatchObjectUpdate]
   );
 
   const handleWheel = useCallback(
@@ -394,6 +582,15 @@ export function Canvas({
           (active as HTMLElement).isContentEditable);
       if (isEditingInput) return;
 
+      if (e.key === 'Escape') {
+        setDrawingConnection(null);
+        drawingConnectionRef.current = null;
+        drawingSnapRef.current = null;
+        setSnapHighlight(null);
+        setIsDraggingEndpoint(false);
+        setLineOverrides({});
+        return;
+      }
       if ((e.key === 'Backspace' || e.key === 'Delete') && selectedObjectIds.length > 0) {
         e.preventDefault();
         onDeleteSelected?.();
@@ -427,7 +624,7 @@ export function Canvas({
     };
   }, []);
 
-  // Attach transformer to selected node(s): one or many (multi-select)
+  // Attach transformer to selected node(s) — exclude lines (they have custom handles)
   useEffect(() => {
     const stage = stageRef.current;
     const transformer = transformerRef.current;
@@ -436,12 +633,16 @@ export function Canvas({
       transformer.nodes([]);
     } else {
       const nodes = selectedObjectIds
-        .map((id) => stage.findOne('#' + id))
+        .map((id) => {
+          const obj = objects.find(o => o.id === id);
+          if (obj && obj.type === 'line') return null;
+          return stage.findOne('#' + id);
+        })
         .filter((n): n is Konva.Node => n != null);
       transformer.nodes(nodes);
     }
     transformer.getLayer()?.batchDraw();
-  }, [selectedObjectIds]);
+  }, [selectedObjectIds, objects]);
 
   // Helper to create onDragMove handler for broadcasting
   const makeDragMoveHandler = useCallback(
@@ -456,6 +657,316 @@ export function Canvas({
   const handleDragEndExtra = useCallback(() => {
     onClearTransform?.();
   }, [onClearTransform]);
+
+  // ── Connected-line helpers ──────────────────────────────────────────────
+  const updateConnectedLines = useCallback((shapeId: string, newX: number, newY: number, newW: number, newH: number, newRot: number) => {
+    const shape = objects.find(o => o.id === shapeId);
+    if (!shape) return;
+    const updatedShape: BoardObject = { ...shape, x: newX, y: newY, width: newW, height: newH, rotation: newRot };
+    const connectedLines = objects.filter(o => o.type === 'line' && (o.fromId === shapeId || o.toId === shapeId));
+    if (connectedLines.length === 0) return;
+    for (const line of connectedLines) {
+      const oldStart = { x: line.x, y: line.y };
+      const oldEnd = { x: line.x + line.width, y: line.y + line.height };
+      let startPt = { ...oldStart };
+      let startDir: Direction = 'right';
+      let endPt = { ...oldEnd };
+      let endDir: Direction = 'left';
+      if (line.fromId === shapeId && line.fromPoint) {
+        const cp = getConnectionPointById(updatedShape, line.fromPoint);
+        if (cp) { startPt = cp; startDir = cp.direction; }
+      } else if (line.fromId) {
+        const other = objects.find(o => o.id === line.fromId);
+        if (other && line.fromPoint) { const cp = getConnectionPointById(other, line.fromPoint); if (cp) { startPt = cp; startDir = cp.direction; } }
+      }
+      if (line.toId === shapeId && line.toPoint) {
+        const cp = getConnectionPointById(updatedShape, line.toPoint);
+        if (cp) { endPt = cp; endDir = cp.direction; }
+      } else if (line.toId) {
+        const other = objects.find(o => o.id === line.toId);
+        if (other && line.toPoint) { const cp = getConnectionPointById(other, line.toPoint); if (cp) { endPt = cp; endDir = cp.direction; } }
+      }
+      const deltaFrom = { x: startPt.x - oldStart.x, y: startPt.y - oldStart.y };
+      const deltaTo = { x: endPt.x - oldEnd.x, y: endPt.y - oldEnd.y };
+      const hasCustomBends = (line.waypoints?.length ?? 0) > 0;
+      const waypoints = hasCustomBends
+        ? (line.waypoints ?? []).map(w => ({ x: w.x + deltaFrom.x + deltaTo.x, y: w.y + deltaFrom.y + deltaTo.y }))
+        : routeOrthogonal(startPt, startDir, endPt, endDir, objects, [shapeId, line.id]);
+      onObjectUpdate(line.id, { x: startPt.x, y: startPt.y, width: endPt.x - startPt.x, height: endPt.y - startPt.y, waypoints });
+    }
+  }, [objects, onObjectUpdate]);
+
+  // Rubber-band connected lines during shape drag (layer-level)
+  const handleLayerDragMove = useCallback((e: Konva.KonvaEventObject<DragEvent>) => {
+    const node = e.target as Konva.Node;
+    const nodeId = node.id?.() ?? '';
+    if (!nodeId) return;
+    const obj = objects.find(o => o.id === nodeId && o.type !== 'line');
+    if (!obj) return;
+    const stage = stageRef.current;
+    if (!stage) return;
+    const nx = node.x(), ny = node.y();
+    const connectedLines = objects.filter(o => o.type === 'line' && (o.fromId === nodeId || o.toId === nodeId));
+    if (connectedLines.length === 0) return;
+    const getShapePos = (id: string): BoardObject | null => {
+      const o = objects.find(x => x.id === id);
+      if (!o) return null;
+      if (selectedObjectIds.includes(id)) {
+        const n = stage.findOne('#' + id);
+        if (n) return { ...o, x: n.x(), y: n.y() };
+      }
+      return o;
+    };
+    const updatedShape: BoardObject = { ...obj, x: nx, y: ny };
+    const overrides: Record<string, LineOverride> = {};
+    for (const line of connectedLines) {
+      const oldSx = line.x, oldSy = line.y, oldEx = line.x + line.width, oldEy = line.y + line.height;
+      let sx = oldSx, sy = oldSy, ex = oldEx, ey = oldEy;
+      const fromShape = line.fromId ? getShapePos(line.fromId) : null;
+      const toShape = line.toId ? getShapePos(line.toId) : null;
+      if (line.fromId === nodeId && line.fromPoint) { const cp = getConnectionPointById(updatedShape, line.fromPoint); if (cp) { sx = cp.x; sy = cp.y; } }
+      else if (fromShape && line.fromPoint) { const cp = getConnectionPointById(fromShape, line.fromPoint); if (cp) { sx = cp.x; sy = cp.y; } }
+      if (line.toId === nodeId && line.toPoint) { const cp = getConnectionPointById(updatedShape, line.toPoint); if (cp) { ex = cp.x; ey = cp.y; } }
+      else if (toShape && line.toPoint) { const cp = getConnectionPointById(toShape, line.toPoint); if (cp) { ex = cp.x; ey = cp.y; } }
+      const deltaFrom = { x: sx - oldSx, y: sy - oldSy };
+      const deltaTo = { x: ex - oldEx, y: ey - oldEy };
+      const waypoints = (line.waypoints?.length ?? 0) > 0
+        ? (line.waypoints ?? []).map(w => ({ x: w.x + deltaFrom.x + deltaTo.x, y: w.y + deltaFrom.y + deltaTo.y }))
+        : [];
+      overrides[line.id] = { x: sx, y: sy, width: ex - sx, height: ey - sy, waypoints };
+    }
+    setLineOverrides(prev => ({ ...prev, ...overrides }));
+  }, [objects, selectedObjectIds]);
+
+  const handleLayerDragEnd = useCallback((e: Konva.KonvaEventObject<DragEvent>) => {
+    const node = e.target as Konva.Node;
+    const nodeId = node.id?.() ?? '';
+    setIsDraggingNode(false);
+    if (!nodeId) return;
+    const obj = objects.find(o => o.id === nodeId && o.type !== 'line');
+    if (!obj) return;
+    if (selectedObjectIds.length > 1 && selectedObjectIds.includes(nodeId)) {
+      setLineOverrides({});
+      return;
+    }
+    updateConnectedLines(nodeId, node.x(), node.y(), obj.width, obj.height, obj.rotation ?? 0);
+    setLineOverrides({});
+  }, [objects, updateConnectedLines, selectedObjectIds]);
+
+  // ── Connection flow (drag-to-connect) ───────────────────────────────────
+
+  /** Find nearest snap candidate among all shapes except the source shape */
+  const findNearestSnapForConnect = useCallback((wx: number, wy: number, excludeShapeId: string): SnapCandidate | null => {
+    let best: SnapCandidate | null = null;
+    let bestDist = SNAP_RADIUS;
+    for (const shape of objects) {
+      if (shape.id === excludeShapeId) continue;
+      for (const cp of getConnectionPoints(shape)) {
+        const d = Math.hypot(cp.x - wx, cp.y - wy);
+        if (d < bestDist) { bestDist = d; best = { shapeId: shape.id, pointId: cp.id, x: cp.x, y: cp.y }; }
+      }
+    }
+    return best;
+  }, [objects]);
+
+  const handleConnectionDragStart = useCallback((shapeId: string, pointId: string, x: number, y: number) => {
+    const conn = { fromShapeId: shapeId, fromPointId: pointId, fromX: x, fromY: y, toX: x, toY: y };
+    setDrawingConnection(conn);
+    drawingConnectionRef.current = conn;
+    drawingSnapRef.current = null;
+  }, []);
+
+  const handleDetachConnection = useCallback((shapeId: string, pointId: string) => {
+    setDrawingConnection(null);
+    drawingConnectionRef.current = null;
+    drawingSnapRef.current = null;
+    setSnapHighlight(null);
+    const linesToDetach = objects.filter(
+      o => o.type === 'line' && (
+        (o.fromId === shapeId && o.fromPoint === pointId) ||
+        (o.toId === shapeId && o.toPoint === pointId)
+      )
+    );
+    for (const line of linesToDetach) {
+      const isFrom = line.fromId === shapeId && line.fromPoint === pointId;
+      if (isFrom) {
+        onObjectUpdate(line.id, { fromId: undefined, fromPoint: undefined, waypoints: [] });
+      } else {
+        onObjectUpdate(line.id, { toId: undefined, toPoint: undefined, waypoints: [] });
+      }
+    }
+  }, [objects, onObjectUpdate]);
+
+  const handleConnectionDragEnd = useCallback((toShapeId: string, toPointId: string) => {
+    const dc = drawingConnectionRef.current;
+    if (!dc) return;
+    const fromShape = objects.find(o => o.id === dc.fromShapeId);
+    const toShape = objects.find(o => o.id === toShapeId);
+    if (!fromShape || !toShape) { setDrawingConnection(null); drawingConnectionRef.current = null; setSnapHighlight(null); return; }
+    const fromPt = getConnectionPointById(fromShape, dc.fromPointId);
+    const toPt = getConnectionPointById(toShape, toPointId);
+    if (!fromPt || !toPt) { setDrawingConnection(null); drawingConnectionRef.current = null; setSnapHighlight(null); return; }
+    const waypoints = routeOrthogonal(fromPt, fromPt.direction, toPt, toPt.direction, objects, [dc.fromShapeId, toShapeId]);
+    onConnectShapes?.(dc.fromShapeId, dc.fromPointId, toShapeId, toPointId, fromPt.x, fromPt.y, toPt.x, toPt.y, waypoints);
+    setDrawingConnection(null);
+    drawingConnectionRef.current = null;
+    setSnapHighlight(null);
+  }, [objects, onConnectShapes]);
+
+  // Finalize drawing connection on mouseup anywhere (snap target or free endpoint)
+  useEffect(() => {
+    if (!drawingConnection) return;
+    const onWindowMouseUp = () => {
+      const dc = drawingConnectionRef.current;
+      if (!dc) return;
+      const snap = drawingSnapRef.current;
+      if (snap) {
+        const fromShape = objects.find(o => o.id === dc.fromShapeId);
+        const toShape = objects.find(o => o.id === snap.shapeId);
+        if (fromShape && toShape) {
+          const fromPt = getConnectionPointById(fromShape, dc.fromPointId);
+          const toPt = getConnectionPointById(toShape, snap.pointId);
+          if (fromPt && toPt) {
+            const waypoints = routeOrthogonal(fromPt, fromPt.direction, toPt, toPt.direction, objects, [dc.fromShapeId, snap.shapeId]);
+            onConnectShapes?.(dc.fromShapeId, dc.fromPointId, snap.shapeId, snap.pointId, fromPt.x, fromPt.y, toPt.x, toPt.y, waypoints);
+          }
+        }
+      } else {
+        const dist = Math.hypot(dc.toX - dc.fromX, dc.toY - dc.fromY);
+        if (dist >= 8) {
+          onConnectShapes?.(dc.fromShapeId, dc.fromPointId, '', '', dc.fromX, dc.fromY, dc.toX, dc.toY, []);
+        }
+      }
+      setDrawingConnection(null);
+      drawingConnectionRef.current = null;
+      drawingSnapRef.current = null;
+      setSnapHighlight(null);
+    };
+    window.addEventListener('mouseup', onWindowMouseUp);
+    return () => window.removeEventListener('mouseup', onWindowMouseUp);
+  }, [drawingConnection, objects, onConnectShapes]);
+
+  // ── Line endpoint drag with snap ────────────────────────────────────────
+  const nonLineObjects = objects.filter(o => o.type !== 'line');
+
+  const findNearestSnap = useCallback((wx: number, wy: number, excludeShapeId?: string): SnapCandidate | null => {
+    let best: SnapCandidate | null = null;
+    let bestDist = SNAP_RADIUS;
+    for (const shape of nonLineObjects) {
+      if (excludeShapeId && shape.id === excludeShapeId) continue;
+      for (const cp of getConnectionPoints(shape)) {
+        const d = Math.hypot(cp.x - wx, cp.y - wy);
+        if (d < bestDist) { bestDist = d; best = { shapeId: shape.id, pointId: cp.id, x: cp.x, y: cp.y }; }
+      }
+    }
+    return best;
+  }, [nonLineObjects]);
+
+  const makeEndpointDragMove = useCallback((endpoint: 'start' | 'end') => {
+    return (e: Konva.KonvaEventObject<DragEvent>) => {
+      const node = e.target as Konva.Node;
+      const wx = node.x(), wy = node.y();
+      const excludeFromSnap = endpoint === 'start' ? effectiveSelectedLine?.fromId : effectiveSelectedLine?.toId;
+      const snap = findNearestSnap(wx, wy, excludeFromSnap);
+      if (snap) { node.x(snap.x); node.y(snap.y); snapCandidateRef.current = snap; setSnapHighlight({ x: snap.x, y: snap.y }); }
+      else { snapCandidateRef.current = null; setSnapHighlight(null); }
+      if (effectiveSelectedLine) {
+        const fx = snap ? snap.x : wx, fy = snap ? snap.y : wy;
+        const line = effectiveSelectedLine;
+        const override: LineOverride = endpoint === 'start'
+          ? { x: fx, y: fy, width: (line.x + line.width) - fx, height: (line.y + line.height) - fy, waypoints: [] }
+          : { x: line.x, y: line.y, width: fx - line.x, height: fy - line.y, waypoints: [] };
+        setLineOverrides(prev => ({ ...prev, [line.id]: override }));
+      }
+    };
+  }, [findNearestSnap, effectiveSelectedLine]);
+
+  const makeEndpointDragEnd = useCallback((endpoint: 'start' | 'end') => {
+    return (e: Konva.KonvaEventObject<DragEvent>) => {
+      setIsDraggingEndpoint(false);
+      setIsDraggingNode(false);
+      setSnapHighlight(null);
+      const node = e.target as Konva.Node;
+      const wx = node.x(), wy = node.y();
+      const snap = snapCandidateRef.current;
+      snapCandidateRef.current = null;
+      if (!selectedLine) { setLineOverrides({}); return; }
+      const fx = snap ? snap.x : wx, fy = snap ? snap.y : wy;
+      const oldEndX = selectedLine.x + selectedLine.width, oldEndY = selectedLine.y + selectedLine.height;
+      let newX = selectedLine.x, newY = selectedLine.y, newW = selectedLine.width, newH = selectedLine.height;
+      let newFromId = selectedLine.fromId, newFromPoint = selectedLine.fromPoint;
+      let newToId = selectedLine.toId, newToPoint = selectedLine.toPoint;
+      if (endpoint === 'start') {
+        newX = fx; newY = fy; newW = oldEndX - fx; newH = oldEndY - fy;
+        if (snap) { newFromId = snap.shapeId; newFromPoint = snap.pointId; } else { newFromId = undefined; newFromPoint = undefined; }
+      } else {
+        newW = fx - selectedLine.x; newH = fy - selectedLine.y;
+        if (snap) { newToId = snap.shapeId; newToPoint = snap.pointId; } else { newToId = undefined; newToPoint = undefined; }
+      }
+      let waypoints: Waypoint[] = selectedLine.waypoints ?? [];
+      if (newFromId && newFromPoint && newToId && newToPoint) {
+        const fromShape = objects.find(o => o.id === newFromId);
+        const toShape = objects.find(o => o.id === newToId);
+        if (fromShape && toShape) {
+          const fromPt = getConnectionPointById(fromShape, newFromPoint);
+          const toPt = getConnectionPointById(toShape, newToPoint);
+          if (fromPt && toPt) { waypoints = routeOrthogonal(fromPt, fromPt.direction, toPt, toPt.direction, objects, [newFromId, newToId, selectedLine.id]); }
+        }
+      } else { waypoints = []; }
+      onObjectUpdate(selectedLine.id, { x: newX, y: newY, width: newW, height: newH, fromId: newFromId, fromPoint: newFromPoint, toId: newToId, toPoint: newToPoint, waypoints });
+      setLineOverrides({});
+    };
+  }, [selectedLine, objects, onObjectUpdate]);
+
+  const handleMidpointClick = useCallback((segmentIndex: number, mx: number, my: number) => {
+    if (!selectedLine) return;
+    const newWps = [...(selectedLine.waypoints ?? [])];
+    newWps.splice(segmentIndex, 0, { x: mx, y: my });
+    onObjectUpdate(selectedLine.id, { waypoints: newWps });
+  }, [selectedLine, onObjectUpdate]);
+
+  const handleWaypointDragEnd = useCallback((wpIndex: number, e: Konva.KonvaEventObject<DragEvent>) => {
+    if (!selectedLine) return;
+    const node = e.target as Konva.Node;
+    const newWps = [...(selectedLine.waypoints ?? [])];
+    newWps[wpIndex] = { x: node.x(), y: node.y() };
+    onObjectUpdate(selectedLine.id, { waypoints: newWps });
+    setLineOverrides({});
+  }, [selectedLine, onObjectUpdate]);
+
+  const renderLineHandles = () => {
+    if (!effectiveSelectedLine) return null;
+    const line = effectiveSelectedLine;
+    const allPts = buildLinePointObjects(line);
+    const startX = line.x, startY = line.y;
+    const endX = line.x + line.width, endY = line.y + line.height;
+    const isStartConnected = !!line.fromId, isEndConnected = !!line.toId;
+    return (
+      <>
+        {allPts.slice(0, -1).map((pt, i) => {
+          const next = allPts[i + 1];
+          const mx = (pt.x + next.x) / 2, my = (pt.y + next.y) / 2;
+          return (
+            <KonvaRect key={`mid-${i}`} x={mx - 7} y={my - 7} width={14} height={14} cornerRadius={3}
+              fill="rgba(66, 133, 244, 0.35)" stroke="#4285f4" strokeWidth={1.5}
+              onClick={() => handleMidpointClick(i, mx, my)} onTap={() => handleMidpointClick(i, mx, my)} />
+          );
+        })}
+        {(line.waypoints ?? []).map((wp, i) => (
+          <KonvaCircle key={`wp-${i}`} x={wp.x} y={wp.y} radius={6} fill="#4285f4" stroke="white" strokeWidth={2}
+            draggable onDragEnd={(e) => handleWaypointDragEnd(i, e)} />
+        ))}
+        <KonvaCircle key="ep-start" x={startX} y={startY} radius={8}
+          fill={isStartConnected ? '#ff6b00' : 'white'} stroke="#4285f4" strokeWidth={2.5} draggable
+          onMouseDown={() => { draggingEndpointRef.current = 'start'; setIsDraggingEndpoint(true); setIsDraggingNode(true); setHoveredShapeId(null); }}
+          onDragMove={makeEndpointDragMove('start')} onDragEnd={makeEndpointDragEnd('start')} />
+        <KonvaCircle key="ep-end" x={endX} y={endY} radius={8}
+          fill={isEndConnected ? '#ff6b00' : 'white'} stroke="#4285f4" strokeWidth={2.5} draggable
+          onMouseDown={() => { draggingEndpointRef.current = 'end'; setIsDraggingEndpoint(true); setIsDraggingNode(true); setHoveredShapeId(null); }}
+          onDragMove={makeEndpointDragMove('end')} onDragEnd={makeEndpointDragEnd('end')} />
+      </>
+    );
+  };
 
   // Compute marquee rect in world coordinates for rendering
   const marqueeRect = marqueeStart && marqueeEnd ? {
@@ -500,7 +1011,7 @@ export function Canvas({
       <Layer>
         <GridBackground viewport={viewport} stageSize={stageSize} />
       </Layer>
-      <Layer>
+      <Layer onDragMove={handleLayerDragMove} onDragEnd={handleLayerDragEnd}>
         {marqueeRect && isMarqueeSelecting && (
           <SelectionRect
             x={marqueeRect.x}
@@ -518,57 +1029,31 @@ export function Canvas({
             const remoteEdit = remoteEditingByObjectId[obj.id];
             const displayObj = remoteXform
               ? { ...obj, x: remoteXform.x, y: remoteXform.y, width: remoteXform.width, height: remoteXform.height, rotation: remoteXform.rotation }
-              : obj;
-            if (obj.type === 'sticky') {
-              return (
-                <StickyNote
-                  key={obj.id}
-                  object={displayObj}
-                  isSelected={false}
-                  onSelect={(additive) => onSelectObject(obj.id, additive)}
-                  onDragStart={() => handleObjectDragStart(obj.id)}
-                  onUpdate={(updates) => onObjectUpdate(obj.id, updates)}
-                  onDoubleClick={() => onObjectDoubleClick?.(obj)}
-                  onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
-                  onDragMove={makeDragMoveHandler(obj)}
-                  onDragEndExtra={handleDragEndExtra}
-                  remoteEditing={remoteEdit}
-                  remoteTransform={remoteXform}
-                />
-              );
-            } else if (obj.type === 'text') {
-              return (
-                <TextElement
-                  key={obj.id}
-                  object={displayObj}
-                  isSelected={false}
-                  onSelect={(additive) => onSelectObject(obj.id, additive)}
-                  onDragStart={() => handleObjectDragStart(obj.id)}
-                  onUpdate={(updates) => onObjectUpdate(obj.id, updates)}
-                  onDoubleClick={() => onObjectDoubleClick?.(obj)}
-                  onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
-                  onDragMove={makeDragMoveHandler(obj)}
-                  onDragEndExtra={handleDragEndExtra}
-                  remoteEditing={remoteEdit}
-                  remoteTransform={remoteXform}
-                />
-              );
-            } else {
-              return (
-                <Rectangle
-                  key={obj.id}
-                  object={displayObj}
-                  isSelected={false}
-                  onSelect={(additive) => onSelectObject(obj.id, additive)}
-                  onDragStart={() => handleObjectDragStart(obj.id)}
-                  onUpdate={(updates) => onObjectUpdate(obj.id, updates)}
-                  onDoubleClick={() => onObjectDoubleClick?.(obj)}
-                  onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
-                  onDragMove={makeDragMoveHandler(obj)}
-                  onDragEndExtra={handleDragEndExtra}
-                  remoteTransform={remoteXform}
-                />
-              );
+              : (lineOverrides[obj.id] && obj.type === 'line' ? { ...obj, ...lineOverrides[obj.id] } : obj);
+            const commonProps = {
+              key: obj.id,
+              object: displayObj,
+              isSelected: false as const,
+              onSelect: (additive: boolean) => onSelectObject(obj.id, additive),
+              onDragStart: () => handleObjectDragStart(obj.id),
+              onUpdate: (updates: Partial<BoardObject>) => onObjectUpdate(obj.id, updates),
+              onDoubleClick: () => onObjectDoubleClick?.(obj),
+              onRightClick: (screenX: number, screenY: number) => onObjectRightClick?.(obj, { x: screenX, y: screenY }),
+              onDragMove: makeDragMoveHandler(obj),
+              onDragEndExtra: handleDragEndExtra,
+              remoteTransform: remoteXform,
+            };
+            switch (obj.type) {
+              case 'sticky':
+                return <StickyNote {...commonProps} remoteEditing={remoteEdit} />;
+              case 'text':
+                return <TextElement {...commonProps} remoteEditing={remoteEdit} />;
+              case 'circle':
+                return <Circle {...commonProps} />;
+              case 'line':
+                return <LineShape {...commonProps} object={displayObj} />;
+              default:
+                return <Rectangle {...commonProps} />;
             }
           })}
         {/* Render selected objects; Transformer only when exactly one selected */}
@@ -578,75 +1063,47 @@ export function Canvas({
             .map((obj) => {
               const remoteXform = remoteTransformByObjectId[obj.id];
               const remoteEdit = remoteEditingByObjectId[obj.id];
-              // During resize/rotate, pass live x/y/rotation; else use remote transform if another user is manipulating
               const displayObject =
                 liveTransform != null
                   ? { ...obj, x: liveTransform.x, y: liveTransform.y, rotation: liveTransform.rotation, width: liveTransform.width, height: liveTransform.height }
                   : remoteXform != null
                     ? { ...obj, x: remoteXform.x, y: remoteXform.y, width: remoteXform.width, height: remoteXform.height, rotation: remoteXform.rotation }
-                    : obj;
+                    : (lineOverrides[obj.id] && obj.type === 'line' ? { ...obj, ...lineOverrides[obj.id] } : obj);
+              const updateHandler = (updates: Partial<BoardObject>) => {
+                if (updates.x !== undefined && updates.y !== undefined && selectedObjectIds.length > 1) {
+                  handleObjectDragEnd(obj.id, updates.x, updates.y);
+                } else {
+                  onObjectUpdate(obj.id, updates);
+                }
+              };
+              const selectedCommon = {
+                object: displayObject,
+                isSelected: true as const,
+                onSelect: (additive: boolean) => onSelectObject(obj.id, additive),
+                onDragStart: () => handleObjectDragStart(obj.id),
+                onUpdate: updateHandler,
+                onDoubleClick: () => onObjectDoubleClick?.(obj),
+                onRightClick: (screenX: number, screenY: number) => onObjectRightClick?.(obj, { x: screenX, y: screenY }),
+                onDragMove: makeDragMoveHandler(obj),
+                onDragEndExtra: handleDragEndExtra,
+                remoteTransform: remoteXform,
+              };
               return (
               <React.Fragment key={obj.id}>
-                {obj.type === 'sticky' ? (
-                  <StickyNote
-                    object={displayObject}
-                    isSelected
-                    onSelect={(additive) => onSelectObject(obj.id, additive)}
-                    onDragStart={() => handleObjectDragStart(obj.id)}
-                    onUpdate={(updates) => {
-                      if (updates.x !== undefined && updates.y !== undefined && selectedObjectIds.length > 1) {
-                        handleObjectDragEnd(obj.id, updates.x, updates.y);
-                      } else {
-                        onObjectUpdate(obj.id, updates);
-                      }
-                    }}
-                    onDoubleClick={() => onObjectDoubleClick?.(obj)}
-                    onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
-                    onDragMove={makeDragMoveHandler(obj)}
-                    onDragEndExtra={handleDragEndExtra}
-                    remoteEditing={remoteEdit}
-                    remoteTransform={remoteXform}
-                  />
-                ) : obj.type === 'text' ? (
-                  <TextElement
-                    object={displayObject}
-                    isSelected
-                    onSelect={(additive) => onSelectObject(obj.id, additive)}
-                    onDragStart={() => handleObjectDragStart(obj.id)}
-                    onUpdate={(updates) => {
-                      if (updates.x !== undefined && updates.y !== undefined && selectedObjectIds.length > 1) {
-                        handleObjectDragEnd(obj.id, updates.x, updates.y);
-                      } else {
-                        onObjectUpdate(obj.id, updates);
-                      }
-                    }}
-                    onDoubleClick={() => onObjectDoubleClick?.(obj)}
-                    onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
-                    onDragMove={makeDragMoveHandler(obj)}
-                    onDragEndExtra={handleDragEndExtra}
-                    remoteEditing={remoteEdit}
-                    remoteTransform={remoteXform}
-                  />
-                ) : (
-                  <Rectangle
-                    object={displayObject}
-                    isSelected
-                    onSelect={(additive) => onSelectObject(obj.id, additive)}
-                    onDragStart={() => handleObjectDragStart(obj.id)}
-                    onUpdate={(updates) => {
-                      if (updates.x !== undefined && updates.y !== undefined && selectedObjectIds.length > 1) {
-                        handleObjectDragEnd(obj.id, updates.x, updates.y);
-                      } else {
-                        onObjectUpdate(obj.id, updates);
-                      }
-                    }}
-                    onDoubleClick={() => onObjectDoubleClick?.(obj)}
-                    onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
-                    onDragMove={makeDragMoveHandler(obj)}
-                    onDragEndExtra={handleDragEndExtra}
-                    remoteTransform={remoteXform}
-                  />
-                )}
+                {(() => {
+                  switch (obj.type) {
+                    case 'sticky':
+                      return <StickyNote {...selectedCommon} remoteEditing={remoteEdit} />;
+                    case 'text':
+                      return <TextElement {...selectedCommon} remoteEditing={remoteEdit} />;
+                    case 'circle':
+                      return <Circle {...selectedCommon} />;
+                    case 'line':
+                      return <LineShape {...selectedCommon} object={displayObject} />;
+                    default:
+                      return <Rectangle {...selectedCommon} />;
+                  }
+                })()}
               </React.Fragment>
               );
             })}
@@ -765,13 +1222,9 @@ export function Canvas({
                     node.scaleY(1);
                     const newWidth = Math.max(MIN_OBJECT_SIZE, obj.width * scaleX);
                     const newHeight = Math.max(MIN_OBJECT_SIZE, obj.height * scaleY);
-                    onObjectUpdate(obj.id, {
-                      x: node.x(),
-                      y: node.y(),
-                      width: newWidth,
-                      height: newHeight,
-                      rotation: node.rotation(),
-                    });
+                    const newX = node.x(), newY = node.y(), newRot = node.rotation();
+                    onObjectUpdate(obj.id, { x: newX, y: newY, width: newWidth, height: newHeight, rotation: newRot });
+                    updateConnectedLines(obj.id, newX, newY, newWidth, newHeight, newRot);
                   } else {
                     const changes: { id: string; updates: Partial<BoardObject> }[] = [];
                     nodes.forEach((node: Konva.Node) => {
@@ -861,6 +1314,41 @@ export function Canvas({
             </>
           );
         })()}
+        {/* Custom handles for selected line */}
+        {renderLineHandles()}
+        {/* Drawing connection line (visual feedback while dragging from X) */}
+        {drawingConnection && (
+          <KonvaLine
+            points={[drawingConnection.fromX, drawingConnection.fromY, drawingConnection.toX, drawingConnection.toY]}
+            stroke="#4285f4"
+            strokeWidth={2}
+            dash={[8, 4]}
+            lineCap="round"
+            listening={false}
+          />
+        )}
+        {/* Connection-point X overlays */}
+        {objects.map(o => {
+          const showXs = (hoveredShapeId === o.id || drawingConnection !== null) && !isDraggingNode;
+          if (!showXs) return null;
+          return (
+            <ConnectionPoints
+              key={`cp-${o.id}`}
+              object={o}
+              activeSourcePointId={drawingConnection?.fromShapeId === o.id ? drawingConnection.fromPointId : null}
+              hasActiveConnection={drawingConnection !== null}
+              ignorePointer={isDraggingEndpoint}
+              onConnectionDragStart={handleConnectionDragStart}
+              onConnectionDragEnd={handleConnectionDragEnd}
+              onDetachConnection={handleDetachConnection}
+            />
+          );
+        })}
+        {/* Snap highlight ring */}
+        {snapHighlight && (
+          <KonvaCircle x={snapHighlight.x} y={snapHighlight.y} radius={12}
+            fill="rgba(255, 107, 0, 0.18)" stroke="#ff6b00" strokeWidth={2} listening={false} />
+        )}
       </Layer>
       <Layer>
         {Object.entries(remoteCursors).map(([userId, cursor]) => (

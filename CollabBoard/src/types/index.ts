@@ -1,6 +1,11 @@
+export interface Waypoint {
+  x: number;
+  y: number;
+}
+
 export interface BoardObject {
   id: string;
-  type: 'sticky' | 'rectangle' | 'text';
+  type: 'sticky' | 'rectangle' | 'circle' | 'line' | 'text';
   x: number;
   y: number;
   width: number;
@@ -12,6 +17,13 @@ export interface BoardObject {
   createdAt: number;
   updatedAt: number;
   updatedBy: string;
+  // Line-specific fields
+  arrowType?: 'none' | 'single' | 'double';
+  waypoints?: Waypoint[];
+  fromId?: string;
+  fromPoint?: string;
+  toId?: string;
+  toPoint?: string;
 }
 
 export interface CursorData {

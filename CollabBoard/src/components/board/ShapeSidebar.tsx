@@ -1,7 +1,9 @@
 import { useRef, useState } from 'react';
 
+type ShapeType = 'rectangle' | 'sticky' | 'text' | 'circle' | 'line' | 'arrow-single' | 'arrow-double';
+
 interface ShapeSidebarProps {
-  onShapeClick?: (shapeType: 'rectangle' | 'sticky' | 'text') => void;
+  onShapeClick?: (shapeType: ShapeType) => void;
   /** Called when a shape drag starts or ends (for drop-zone feedback) */
   onDragStateChange?: (isDragging: boolean) => void;
   /** Controlled open state for the shapes submenu (e.g. close when canvas is clicked) */
@@ -40,6 +42,37 @@ const ShapesIcon = () => (
 const RectanglePanelIcon = () => (
   <svg width="32" height="24" viewBox="0 0 40 30">
     <rect x="2" y="2" width="36" height="26" fill="#90CAF9" stroke="#2196F3" strokeWidth="2" rx="2" />
+  </svg>
+);
+
+/** Circle icon for shapes panel */
+const CirclePanelIcon = () => (
+  <svg width="32" height="24" viewBox="0 0 40 30">
+    <ellipse cx="20" cy="15" rx="16" ry="12" fill="#CE93D8" stroke="#9C27B0" strokeWidth="2" />
+  </svg>
+);
+
+/** Line icon for shapes panel */
+const LinePanelIcon = () => (
+  <svg width="32" height="24" viewBox="0 0 40 30">
+    <line x1="4" y1="26" x2="36" y2="4" stroke="#424242" strokeWidth="2" strokeLinecap="round" />
+  </svg>
+);
+
+/** Single arrow icon for shapes panel */
+const ArrowSinglePanelIcon = () => (
+  <svg width="32" height="24" viewBox="0 0 40 30">
+    <line x1="4" y1="26" x2="36" y2="4" stroke="#424242" strokeWidth="2" strokeLinecap="round" />
+    <polyline points="28,4 36,4 36,12" fill="none" stroke="#424242" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+/** Double arrow icon for shapes panel */
+const ArrowDoublePanelIcon = () => (
+  <svg width="32" height="24" viewBox="0 0 40 30">
+    <line x1="4" y1="26" x2="36" y2="4" stroke="#424242" strokeWidth="2" strokeLinecap="round" />
+    <polyline points="28,4 36,4 36,12" fill="none" stroke="#424242" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    <polyline points="12,26 4,26 4,18" fill="none" stroke="#424242" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
 
@@ -121,7 +154,7 @@ export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({
   const shapesPanelOpen = shapesPanelOpenProp ?? shapesPanelOpenInternal;
   const setShapesPanelOpen = onShapesPanelOpenChange ?? setShapesPanelOpenInternal;
 
-  const handleDragStart = (shapeType: 'rectangle' | 'sticky' | 'text', e: React.DragEvent) => {
+  const handleDragStart = (shapeType: ShapeType, e: React.DragEvent) => {
     didDragRef.current = true;
     onDragStateChange?.(true);
     if (e.dataTransfer) {
@@ -138,7 +171,7 @@ export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({
     onDragStateChange?.(false);
   };
 
-  const handleClick = (shapeType: 'rectangle' | 'sticky' | 'text') => {
+  const handleClick = (shapeType: ShapeType) => {
     if (didDragRef.current) {
       didDragRef.current = false;
       return;
@@ -194,7 +227,7 @@ export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({
         />
       </div>
 
-      {/* Shapes panel – to the right, rectangle only */}
+      {/* Shapes panel – to the right */}
       {shapesPanelOpen && (
         <div className="shape-panel" data-testid="shape-panel" role="region" aria-label="Shapes and lines">
           <div
@@ -210,6 +243,66 @@ export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({
           >
             <span className="shape-panel-icon">
               <RectanglePanelIcon />
+            </span>
+          </div>
+          <div
+            className="shape-panel-item"
+            data-testid="shape-template-circle"
+            data-shape-type="circle"
+            draggable
+            onClick={() => handleClick('circle')}
+            onDragStart={(e) => handleDragStart('circle', e)}
+            onDragEnd={handleDragEnd}
+            role="button"
+            aria-label="Circle"
+          >
+            <span className="shape-panel-icon">
+              <CirclePanelIcon />
+            </span>
+          </div>
+          <div
+            className="shape-panel-item"
+            data-testid="shape-template-line"
+            data-shape-type="line"
+            draggable
+            onClick={() => handleClick('line')}
+            onDragStart={(e) => handleDragStart('line', e)}
+            onDragEnd={handleDragEnd}
+            role="button"
+            aria-label="Line"
+          >
+            <span className="shape-panel-icon">
+              <LinePanelIcon />
+            </span>
+          </div>
+          <div
+            className="shape-panel-item"
+            data-testid="shape-template-arrow-single"
+            data-shape-type="arrow-single"
+            draggable
+            onClick={() => handleClick('arrow-single')}
+            onDragStart={(e) => handleDragStart('arrow-single', e)}
+            onDragEnd={handleDragEnd}
+            role="button"
+            aria-label="Single arrow"
+          >
+            <span className="shape-panel-icon">
+              <ArrowSinglePanelIcon />
+            </span>
+          </div>
+          <div
+            className="shape-panel-item"
+            data-testid="shape-template-arrow-double"
+            data-shape-type="arrow-double"
+            draggable
+            onClick={() => handleClick('arrow-double')}
+            onDragStart={(e) => handleDragStart('arrow-double', e)}
+            onDragEnd={handleDragEnd}
+            role="button"
+            aria-label="Double arrow"
+          >
+            <span className="shape-panel-icon">
+              <ArrowDoublePanelIcon />
             </span>
           </div>
         </div>

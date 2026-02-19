@@ -137,7 +137,7 @@ export const StylePanel: React.FC<StylePanelProps> = ({
         <div className="property-group">
           <label className="property-label">Type</label>
           <div className="property-value">
-            {selectedObject.type === 'rectangle' ? 'Rectangle' : selectedObject.type === 'sticky' ? 'Sticky Note' : 'Text'}
+            {selectedObject.type === 'rectangle' ? 'Rectangle' : selectedObject.type === 'sticky' ? 'Sticky Note' : selectedObject.type === 'circle' ? 'Circle' : selectedObject.type === 'line' ? 'Line' : 'Text'}
           </div>
         </div>
         </>

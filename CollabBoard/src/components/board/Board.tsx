@@ -19,7 +19,7 @@ import { useLiveEditing } from '../../hooks/useLiveEditing';
 import { useSelection } from '../../hooks/useSelection';
 import { onBoardMetaChange, updateBoardName } from '../../firebase/boardMeta';
 import { screenToWorld, worldToScreen } from '../../utils/coordinates';
-import type { BoardObject, BoardMeta } from '../../types';
+import type { BoardObject, BoardMeta, Waypoint } from '../../types';
 
 function generateId() {
   return `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -151,7 +151,7 @@ export function Board() {
     selectedCount: selectedObjectIds.length,
   });
 
-  const createObjectAtCenter = useCallback((type: 'rectangle' | 'sticky' | 'text') => {
+  const createObjectAtCenter = useCallback((type: 'rectangle' | 'sticky' | 'text' | 'circle' | 'line' | 'arrow-single' | 'arrow-double') => {
     if (!user) {
       console.error('❌ No user found - cannot create object');
       return;
@@ -208,6 +208,42 @@ export function Board() {
         updatedBy: user.uid,
       };
       console.log('📝 Creating text element:', newObject);
+    } else if (type === 'circle') {
+      const circleSize = 150;
+      newObject = {
+        id,
+        type: 'circle',
+        x: worldCenterX - (circleSize / 2),
+        y: worldCenterY - (circleSize / 2),
+        width: circleSize,
+        height: circleSize,
+        rotation: 0,
+        color: '#CE93D8',
+        createdBy: user.uid,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        updatedBy: user.uid,
+      };
+      console.log('⭕ Creating circle:', newObject);
+    } else if (type === 'line' || type === 'arrow-single' || type === 'arrow-double') {
+      const lineWidth = 200;
+      newObject = {
+        id,
+        type: 'line',
+        x: worldCenterX - (lineWidth / 2),
+        y: worldCenterY,
+        width: lineWidth,
+        height: 0,
+        rotation: 0,
+        color: '#424242',
+        arrowType: type === 'arrow-single' ? 'single' : type === 'arrow-double' ? 'double' : 'none',
+        waypoints: [],
+        createdBy: user.uid,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        updatedBy: user.uid,
+      };
+      console.log('📏 Creating line/arrow:', newObject);
     } else {
       const rectWidth = 200;
       const rectHeight = 150;
@@ -468,8 +504,43 @@ export function Board() {
     [viewport]
   );
 
+  const handleConnectShapes = useCallback(
+    (fromId: string, fromPoint: string, toId: string, toPoint: string, startX: number, startY: number, endX: number, endY: number, waypoints: Waypoint[]) => {
+      if (!user) return;
+      const id = generateId();
+      const newLine: BoardObject = {
+        id,
+        type: 'line',
+        x: startX,
+        y: startY,
+        width: endX - startX,
+        height: endY - startY,
+        rotation: 0,
+        color: '#424242',
+        arrowType: 'none',
+        waypoints,
+        fromId: fromId || undefined,
+        fromPoint: fromPoint || undefined,
+        toId: toId || undefined,
+        toPoint: toPoint || undefined,
+        createdBy: user.uid,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        updatedBy: user.uid,
+      };
+      addObject(newLine)
+        .then(() => {
+          setSelectedObjectIds([id]);
+          pushAction({ type: 'add', objects: [newLine] });
+          console.log('🔗 Connected line created:', newLine);
+        })
+        .catch(err => console.error('❌ Failed to create connected line:', err));
+    },
+    [user, addObject, pushAction]
+  );
+
   const handleShapeDrop = useCallback(
-    (shapeType: 'rectangle' | 'sticky' | 'text', screenX: number, screenY: number) => {
+    (shapeType: 'rectangle' | 'sticky' | 'text' | 'circle' | 'line' | 'arrow-single' | 'arrow-double', screenX: number, screenY: number) => {
       if (!user) {
         console.error('❌ No user found - cannot create object');
         return;
@@ -525,6 +596,40 @@ export function Board() {
           updatedAt: Date.now(),
           updatedBy: user.uid,
         };
+      } else if (shapeType === 'circle') {
+        const circleSize = 150;
+        newObject = {
+          id,
+          type: 'circle',
+          x: worldPos.x - circleSize / 2,
+          y: worldPos.y - circleSize / 2,
+          width: circleSize,
+          height: circleSize,
+          rotation: 0,
+          color: '#CE93D8',
+          createdBy: user.uid,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          updatedBy: user.uid,
+        };
+      } else if (shapeType === 'line' || shapeType === 'arrow-single' || shapeType === 'arrow-double') {
+        const lineWidth = 200;
+        newObject = {
+          id,
+          type: 'line',
+          x: worldPos.x - lineWidth / 2,
+          y: worldPos.y,
+          width: lineWidth,
+          height: 0,
+          rotation: 0,
+          color: '#424242',
+          arrowType: shapeType === 'arrow-single' ? 'single' : shapeType === 'arrow-double' ? 'double' : 'none',
+          waypoints: [],
+          createdBy: user.uid,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          updatedBy: user.uid,
+        };
       } else {
         const rectWidth = 200;
         const rectHeight = 150;
@@ -536,7 +641,7 @@ export function Board() {
           width: rectWidth,
           height: rectHeight,
           rotation: 0,
-          color: '#90CAF9', // Light blue
+          color: '#90CAF9',
           createdBy: user.uid,
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -579,7 +684,7 @@ export function Board() {
       const now = Date.now();
       if (now - lastDropHandledAtRef.current < 300) return;
       lastDropHandledAtRef.current = now;
-      const shapeType = e.dataTransfer.getData('shape-type') as 'rectangle' | 'sticky' | 'text';
+      const shapeType = e.dataTransfer.getData('shape-type') as 'rectangle' | 'sticky' | 'text' | 'circle' | 'line' | 'arrow-single' | 'arrow-double';
       if (shapeType && canvasContainerRef.current) {
         const rect = canvasContainerRef.current.getBoundingClientRect();
         const x = e.clientX - rect.left;
@@ -770,6 +875,7 @@ export function Board() {
               remoteEditings={remoteEditings}
               onBroadcastTransform={broadcastTransform}
               onClearTransform={clearTransform}
+              onConnectShapes={handleConnectShapes}
               isDraggingShapeFromSidebar={isDraggingShapeFromSidebar}
             />
         {contextMenu && (
