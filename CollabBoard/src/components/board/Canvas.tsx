@@ -70,6 +70,10 @@ interface CanvasProps {
   onClearTransform?: () => void;
   /** When true, stage panning is disabled so HTML5 drop from sidebar is not stolen. */
   isDraggingShapeFromSidebar?: boolean;
+  /** Notify parent which object IDs just started dragging (so Firestore snapshots don't reset their positions). */
+  onDragStart?: (ids: string[]) => void;
+  /** Notify parent which object IDs just finished dragging. */
+  onDragEnd?: (ids: string[]) => void;
   /** Called when user drag-connects shapes via connection X marks. toId/toPoint are empty for free-ended lines. */
   onConnectShapes?: (
     fromId: string, fromPoint: string,
@@ -83,6 +87,86 @@ interface CanvasProps {
 const ZOOM_SPEED = 1.05;
 /** Minimum size so sticky notes and shapes stay usable and don't collapse. */
 const MIN_OBJECT_SIZE = 60;
+
+/**
+ * Preserve waypoint bend when start/end move: express waypoints relative to the
+ * start-end segment, then reconstruct with new start/end so the path shape stays constant.
+ */
+function preserveWaypointBend(
+  waypoints: Waypoint[],
+  oldStart: { x: number; y: number },
+  oldEnd: { x: number; y: number },
+  newStart: { x: number; y: number },
+  newEnd: { x: number; y: number },
+): Waypoint[] {
+  const dx = oldEnd.x - oldStart.x;
+  const dy = oldEnd.y - oldStart.y;
+  const L = Math.hypot(dx, dy) || 1e-6;
+  const perpX = -dy / L;
+  const perpY = dx / L;
+
+  const newDx = newEnd.x - newStart.x;
+  const newDy = newEnd.y - newStart.y;
+  const newL = Math.hypot(newDx, newDy) || 1e-6;
+  const newPerpX = -newDy / newL;
+  const newPerpY = newDx / newL;
+
+  return waypoints.map((w) => {
+    const wx = w.x - oldStart.x;
+    const wy = w.y - oldStart.y;
+    const u = (wx * dx + wy * dy) / (L * L);
+    const v = wx * perpX + wy * perpY;
+    return {
+      x: newStart.x + u * newDx + v * newPerpX,
+      y: newStart.y + u * newDy + v * newPerpY,
+    };
+  });
+}
+
+/** Compute line geometry updates for all lines connected to any shape in shapeUpdates. */
+function computeConnectedLineUpdates(
+  shapeUpdates: Array<{ id: string; x: number; y: number; width: number; height: number; rotation: number }>,
+  objects: BoardObject[],
+): Array<{ id: string; updates: Partial<BoardObject> }> {
+  const updatedIds = new Set(shapeUpdates.map((s) => s.id));
+  const shapeUpdatesMap = new Map(shapeUpdates.map((s) => [s.id, s]));
+  const getVirtual = (id: string): BoardObject | undefined => {
+    const obj = objects.find((o) => o.id === id);
+    if (!obj) return undefined;
+    const up = shapeUpdatesMap.get(id);
+    return up ? { ...obj, ...up } : obj;
+  };
+  const result: Array<{ id: string; updates: Partial<BoardObject> }> = [];
+  for (const line of objects) {
+    if (line.type !== 'line') continue;
+    const fromUpdated = line.fromId != null && updatedIds.has(line.fromId);
+    const toUpdated = line.toId != null && updatedIds.has(line.toId);
+    if (!fromUpdated && !toUpdated) continue;
+    const fromShape = line.fromId ? getVirtual(line.fromId) : null;
+    const toShape = line.toId ? getVirtual(line.toId) : null;
+    let startPt = { x: line.x, y: line.y };
+    let endPt = { x: line.x + line.width, y: line.y + line.height };
+    if (line.fromId && line.fromPoint && fromShape) {
+      const cp = getConnectionPointById(fromShape, line.fromPoint);
+      if (cp) { startPt = cp; }
+    }
+    if (line.toId && line.toPoint && toShape) {
+      const cp = getConnectionPointById(toShape, line.toPoint);
+      if (cp) { endPt = cp; }
+    }
+    const oldStart = { x: line.x, y: line.y };
+    const oldEnd = { x: line.x + line.width, y: line.y + line.height };
+    const hasWaypoints = (line.waypoints?.length ?? 0) > 0;
+    const waypoints = hasWaypoints
+      ? preserveWaypointBend(line.waypoints!, oldStart, oldEnd, startPt, endPt)
+      : [];
+    result.push({
+      id: line.id,
+      updates: { x: startPt.x, y: startPt.y, width: endPt.x - startPt.x, height: endPt.y - startPt.y, waypoints },
+    });
+  }
+  return result;
+}
 
 export function Canvas({
   objects,
@@ -113,6 +197,8 @@ export function Canvas({
   onBroadcastTransform,
   onClearTransform,
   isDraggingShapeFromSidebar = false,
+  onDragStart,
+  onDragEnd,
   onConnectShapes,
 }: CanvasProps) {
   const stageRef = useRef<Konva.Stage>(null);
@@ -162,6 +248,11 @@ export function Canvas({
   const drawingSnapRef = useRef<SnapCandidate | null>(null);
 
   const [isDraggingNode, setIsDraggingNode] = useState(false);
+
+  /** When multi-select: current visual position/size/rotation of each selected node (for ConnectionPoints and line overrides). */
+  const multiSelectDisplayRef = useRef<Map<string, { x: number; y: number; width: number; height: number; rotation: number }>>(new Map());
+  /** When dragging multi-select via marquee rect: rect start position. */
+  const multiSelectDragStartRef = useRef<{ x: number; y: number } | null>(null);
 
   // Selected line (only when single selection of a line)
   const selectedLine = selectedObjectIds.length === 1
@@ -393,6 +484,11 @@ export function Canvas({
     (draggedId: string) => {
       setIsDraggingNode(true);
       setHoveredShapeId(null);
+      const idsBeingDragged =
+        selectedObjectIds.includes(draggedId) && selectedObjectIds.length > 1
+          ? selectedObjectIds
+          : [draggedId];
+      onDragStart?.(idsBeingDragged);
       if (selectedObjectIds.includes(draggedId) && selectedObjectIds.length > 1) {
         const stage = stageRef.current;
         if (!stage) return;
@@ -406,7 +502,7 @@ export function Canvas({
         dragStartPositionsRef.current = null;
       }
     },
-    [selectedObjectIds]
+    [selectedObjectIds, onDragStart]
   );
 
   const handleObjectDragMove = useCallback(
@@ -437,6 +533,10 @@ export function Canvas({
   const handleObjectDragEnd = useCallback(
     (draggedId: string, finalX: number, finalY: number) => {
       const positions = dragStartPositionsRef.current;
+      // Unmark before writing so Firestore snapshot after update uses fresh data
+      const idsBeingDragged =
+        positions && selectedObjectIds.length > 1 ? selectedObjectIds : [draggedId];
+      onDragEnd?.(idsBeingDragged);
       if (!positions || selectedObjectIds.length <= 1) {
         onObjectUpdate(draggedId, { x: finalX, y: finalY });
         return;
@@ -474,23 +574,19 @@ export function Canvas({
             const oldStart = { x: obj.x, y: obj.y };
             const oldEnd = { x: obj.x + obj.width, y: obj.y + obj.height };
             let startPt = { ...oldStart };
-            let startDir: Direction = 'right';
             let endPt = { ...oldEnd };
-            let endDir: Direction = 'left';
             if (obj.fromId && obj.fromPoint && fromShape) {
               const cp = getConnectionPointById(fromShape, obj.fromPoint);
-              if (cp) { startPt = cp; startDir = cp.direction; }
+              if (cp) { startPt = cp; }
             }
             if (obj.toId && obj.toPoint && toShape) {
               const cp = getConnectionPointById(toShape, obj.toPoint);
-              if (cp) { endPt = cp; endDir = cp.direction; }
+              if (cp) { endPt = cp; }
             }
-            const deltaFrom = { x: startPt.x - oldStart.x, y: startPt.y - oldStart.y };
-            const deltaTo = { x: endPt.x - oldEnd.x, y: endPt.y - oldEnd.y };
-            const hasCustomBends = (obj.waypoints?.length ?? 0) > 0;
-            const waypoints = hasCustomBends
-              ? (obj.waypoints ?? []).map(w => ({ x: w.x + deltaFrom.x + deltaTo.x, y: w.y + deltaFrom.y + deltaTo.y }))
-              : routeOrthogonal(startPt, startDir, endPt, endDir, objects.map(o => buildVirtualShape(o)), [obj.fromId, obj.toId, obj.id].filter(Boolean) as string[]);
+            const hasWaypoints = (obj.waypoints?.length ?? 0) > 0;
+            const waypoints = hasWaypoints
+              ? preserveWaypointBend(obj.waypoints!, oldStart, oldEnd, startPt, endPt)
+              : [];
             changes.push({ id, updates: { x: startPt.x, y: startPt.y, width: endPt.x - startPt.x, height: endPt.y - startPt.y, waypoints } });
           } else {
             changes.push({
@@ -507,6 +603,30 @@ export function Canvas({
         }
       }
 
+      const shapeUpdates = selectedObjectIds
+        .filter((id) => {
+          const obj = objects.find((o) => o.id === id);
+          return obj && obj.type !== 'line';
+        })
+        .map((id) => {
+          const pos = positions.get(id);
+          const obj = objects.find((o) => o.id === id)!;
+          if (!pos) return null;
+          return {
+            id,
+            x: pos.x + dx,
+            y: pos.y + dy,
+            width: obj.width,
+            height: obj.height,
+            rotation: obj.rotation ?? 0,
+          };
+        })
+        .filter((u): u is NonNullable<typeof u> => u != null);
+      const lineUpdates = computeConnectedLineUpdates(shapeUpdates, objects).filter(
+        (lu) => !selectedIdsSet.has(lu.id),
+      );
+      changes.push(...lineUpdates);
+
       if (onBatchObjectUpdate && changes.length > 0) {
         onBatchObjectUpdate(changes);
       } else {
@@ -514,7 +634,73 @@ export function Canvas({
       }
       dragStartPositionsRef.current = null;
     },
-    [selectedObjectIds, objects, onObjectUpdate, onBatchObjectUpdate]
+    [selectedObjectIds, objects, onObjectUpdate, onBatchObjectUpdate, onDragEnd]
+  );
+
+  const handleMultiSelectMarqueeDragStart = useCallback(
+    (e: Konva.KonvaEventObject<DragEvent>) => {
+      const rect = e.target;
+      multiSelectDragStartRef.current = { x: rect.x(), y: rect.y() };
+      onDragStart?.(selectedObjectIds);
+      const stage = stageRef.current;
+      if (!stage || selectedObjectIds.length <= 1) return;
+      const positions = new Map<string, { x: number; y: number }>();
+      selectedObjectIds.forEach((id) => {
+        const node = stage.findOne('#' + id);
+        if (node) positions.set(id, { x: node.x(), y: node.y() });
+      });
+      dragStartPositionsRef.current = positions;
+      setIsDraggingNode(true);
+      setHoveredShapeId(null);
+    },
+    [selectedObjectIds, onDragStart]
+  );
+
+  const handleMultiSelectMarqueeDragMove = useCallback(
+    (e: Konva.KonvaEventObject<DragEvent>) => {
+      const rect = e.target;
+      const start = multiSelectDragStartRef.current;
+      const positions = dragStartPositionsRef.current;
+      if (!start || !positions || selectedObjectIds.length <= 1) return;
+      const dx = rect.x() - start.x;
+      const dy = rect.y() - start.y;
+      const stage = stageRef.current;
+      if (!stage) return;
+      selectedObjectIds.forEach((id) => {
+        const pos = positions.get(id);
+        if (!pos) return;
+        const node = stage.findOne('#' + id);
+        if (node) {
+          node.x(pos.x + dx);
+          node.y(pos.y + dy);
+        }
+      });
+      rect.position({ x: start.x + dx, y: start.y + dy });
+      stage.findOne('.konva-transformer')?.getLayer()?.batchDraw();
+    },
+    [selectedObjectIds]
+  );
+
+  const handleMultiSelectMarqueeDragEnd = useCallback(
+    (e: Konva.KonvaEventObject<DragEvent>) => {
+      const rect = e.target;
+      const start = multiSelectDragStartRef.current;
+      const positions = dragStartPositionsRef.current;
+      multiSelectDragStartRef.current = null;
+      setIsDraggingNode(false);
+      if (!start || !positions || selectedObjectIds.length <= 1) {
+        onDragEnd?.(selectedObjectIds);
+        return;
+      }
+      const dx = rect.x() - start.x;
+      const dy = rect.y() - start.y;
+      const firstId = selectedObjectIds[0];
+      const pos = positions.get(firstId);
+      if (!pos) { onDragEnd?.(selectedObjectIds); return; }
+      // handleObjectDragEnd already calls onDragEnd, so no need to call it here
+      handleObjectDragEnd(firstId, pos.x + dx, pos.y + dy);
+    },
+    [selectedObjectIds, handleObjectDragEnd, onDragEnd]
   );
 
   const handleWheel = useCallback(
@@ -631,6 +817,7 @@ export function Canvas({
     if (!stage || !transformer) return;
     if (selectedObjectIds.length === 0) {
       transformer.nodes([]);
+      multiSelectDisplayRef.current.clear();
     } else {
       const nodes = selectedObjectIds
         .map((id) => {
@@ -640,6 +827,26 @@ export function Canvas({
         })
         .filter((n): n is Konva.Node => n != null);
       transformer.nodes(nodes);
+      if (nodes.length > 1) {
+        const map = new Map<string, { x: number; y: number; width: number; height: number; rotation: number }>();
+        nodes.forEach((node: Konva.Node) => {
+          const id = node.id?.();
+          if (id) {
+            const w = node.width();
+            const h = node.height();
+            map.set(id, {
+              x: node.x(),
+              y: node.y(),
+              width: w * (node.scaleX?.() ?? 1),
+              height: h * (node.scaleY?.() ?? 1),
+              rotation: node.rotation?.() ?? 0,
+            });
+          }
+        });
+        multiSelectDisplayRef.current = map;
+      } else {
+        multiSelectDisplayRef.current.clear();
+      }
     }
     transformer.getLayer()?.batchDraw();
   }, [selectedObjectIds, objects]);
@@ -686,11 +893,9 @@ export function Canvas({
         const other = objects.find(o => o.id === line.toId);
         if (other && line.toPoint) { const cp = getConnectionPointById(other, line.toPoint); if (cp) { endPt = cp; endDir = cp.direction; } }
       }
-      const deltaFrom = { x: startPt.x - oldStart.x, y: startPt.y - oldStart.y };
-      const deltaTo = { x: endPt.x - oldEnd.x, y: endPt.y - oldEnd.y };
-      const hasCustomBends = (line.waypoints?.length ?? 0) > 0;
-      const waypoints = hasCustomBends
-        ? (line.waypoints ?? []).map(w => ({ x: w.x + deltaFrom.x + deltaTo.x, y: w.y + deltaFrom.y + deltaTo.y }))
+      const hasWaypoints = (line.waypoints?.length ?? 0) > 0;
+      const waypoints = hasWaypoints
+        ? preserveWaypointBend(line.waypoints!, oldStart, oldEnd, startPt, endPt)
         : routeOrthogonal(startPt, startDir, endPt, endDir, objects, [shapeId, line.id]);
       onObjectUpdate(line.id, { x: startPt.x, y: startPt.y, width: endPt.x - startPt.x, height: endPt.y - startPt.y, waypoints });
     }
@@ -728,10 +933,12 @@ export function Canvas({
       else if (fromShape && line.fromPoint) { const cp = getConnectionPointById(fromShape, line.fromPoint); if (cp) { sx = cp.x; sy = cp.y; } }
       if (line.toId === nodeId && line.toPoint) { const cp = getConnectionPointById(updatedShape, line.toPoint); if (cp) { ex = cp.x; ey = cp.y; } }
       else if (toShape && line.toPoint) { const cp = getConnectionPointById(toShape, line.toPoint); if (cp) { ex = cp.x; ey = cp.y; } }
-      const deltaFrom = { x: sx - oldSx, y: sy - oldSy };
-      const deltaTo = { x: ex - oldEx, y: ey - oldEy };
+      const oldStart = { x: oldSx, y: oldSy };
+      const oldEnd = { x: oldEx, y: oldEy };
+      const newStart = { x: sx, y: sy };
+      const newEnd = { x: ex, y: ey };
       const waypoints = (line.waypoints?.length ?? 0) > 0
-        ? (line.waypoints ?? []).map(w => ({ x: w.x + deltaFrom.x + deltaTo.x, y: w.y + deltaFrom.y + deltaTo.y }))
+        ? preserveWaypointBend(line.waypoints!, oldStart, oldEnd, newStart, newEnd)
         : [];
       overrides[line.id] = { x: sx, y: sy, width: ex - sx, height: ey - sy, waypoints };
     }
@@ -883,6 +1090,7 @@ export function Canvas({
 
   const makeEndpointDragEnd = useCallback((endpoint: 'start' | 'end') => {
     return (e: Konva.KonvaEventObject<DragEvent>) => {
+      if (selectedLine) onDragEnd?.([selectedLine.id]);
       setIsDraggingEndpoint(false);
       setIsDraggingNode(false);
       setSnapHighlight(null);
@@ -916,7 +1124,7 @@ export function Canvas({
       onObjectUpdate(selectedLine.id, { x: newX, y: newY, width: newW, height: newH, fromId: newFromId, fromPoint: newFromPoint, toId: newToId, toPoint: newToPoint, waypoints });
       setLineOverrides({});
     };
-  }, [selectedLine, objects, onObjectUpdate]);
+  }, [selectedLine, objects, onObjectUpdate, onDragEnd]);
 
   const handleMidpointClick = useCallback((segmentIndex: number, mx: number, my: number) => {
     if (!selectedLine) return;
@@ -958,11 +1166,11 @@ export function Canvas({
         ))}
         <KonvaCircle key="ep-start" x={startX} y={startY} radius={8}
           fill={isStartConnected ? '#ff6b00' : 'white'} stroke="#4285f4" strokeWidth={2.5} draggable
-          onMouseDown={() => { draggingEndpointRef.current = 'start'; setIsDraggingEndpoint(true); setIsDraggingNode(true); setHoveredShapeId(null); }}
+          onMouseDown={() => { draggingEndpointRef.current = 'start'; setIsDraggingEndpoint(true); setIsDraggingNode(true); setHoveredShapeId(null); if (effectiveSelectedLine) onDragStart?.([effectiveSelectedLine.id]); }}
           onDragMove={makeEndpointDragMove('start')} onDragEnd={makeEndpointDragEnd('start')} />
         <KonvaCircle key="ep-end" x={endX} y={endY} radius={8}
           fill={isEndConnected ? '#ff6b00' : 'white'} stroke="#4285f4" strokeWidth={2.5} draggable
-          onMouseDown={() => { draggingEndpointRef.current = 'end'; setIsDraggingEndpoint(true); setIsDraggingNode(true); setHoveredShapeId(null); }}
+          onMouseDown={() => { draggingEndpointRef.current = 'end'; setIsDraggingEndpoint(true); setIsDraggingNode(true); setHoveredShapeId(null); if (effectiveSelectedLine) onDragStart?.([effectiveSelectedLine.id]); }}
           onDragMove={makeEndpointDragMove('end')} onDragEnd={makeEndpointDragEnd('end')} />
       </>
     );
@@ -1107,16 +1315,6 @@ export function Canvas({
               </React.Fragment>
               );
             })}
-        {/* Dashed bounding box when multiple shapes selected (marquee-style) */}
-        {selectedObjectIds.length > 1 && multiSelectBounds && (
-          <SelectionRect
-            x={multiSelectBounds.x}
-            y={multiSelectBounds.y}
-            width={multiSelectBounds.width}
-            height={multiSelectBounds.height}
-            visible
-          />
-        )}
         {/* Single Transformer for one or many selected; multi = keep aspect ratio + rotate all */}
         {selectedObjectIds.length >= 1 && (() => {
           const singleObj = selectedObjectIds.length === 1 ? objects.find((o) => o.id === selectedObjectIds[0]) : null;
@@ -1172,6 +1370,74 @@ export function Canvas({
                   }
                 }}
                 onTransform={(e) => {
+                  const transformer = transformerRef.current;
+                  const nodes = transformer?.nodes() ?? [];
+                  if (selectedObjectIds.length > 1 && nodes.length > 1) {
+                    const selectedSet = new Set(selectedObjectIds);
+                    const map = new Map<string, { x: number; y: number; width: number; height: number; rotation: number }>();
+                    const virtualById = new Map<string, BoardObject>();
+                    nodes.forEach((node: Konva.Node) => {
+                      const id = node.id?.();
+                      if (!id) return;
+                      const obj = objects.find((o) => o.id === id);
+                      if (!obj) return;
+                      const w = node.width();
+                      const h = node.height();
+                      const sx = node.scaleX?.() ?? 1;
+                      const sy = node.scaleY?.() ?? 1;
+                      const data = {
+                        x: node.x(),
+                        y: node.y(),
+                        width: Math.max(MIN_OBJECT_SIZE, w * sx),
+                        height: Math.max(MIN_OBJECT_SIZE, h * sy),
+                        rotation: node.rotation?.() ?? 0,
+                      };
+                      map.set(id, data);
+                      virtualById.set(id, { ...obj, ...data });
+                    });
+                    multiSelectDisplayRef.current = map;
+                    const getVirtual = (id: string): BoardObject | undefined =>
+                      virtualById.get(id) ?? objects.find((o) => o.id === id);
+                    const connectedLines = objects.filter(
+                      (o) =>
+                        o.type === 'line' &&
+                        ((o.fromId != null && selectedSet.has(o.fromId)) || (o.toId != null && selectedSet.has(o.toId))),
+                    );
+                    const overrides: Record<string, LineOverride> = {};
+                    for (const line of connectedLines) {
+                      const fromShape = line.fromId ? getVirtual(line.fromId) : null;
+                      const toShape = line.toId ? getVirtual(line.toId) : null;
+                      let startPt = { x: line.x, y: line.y };
+                      let endPt = { x: line.x + line.width, y: line.y + line.height };
+                      if (line.fromId && line.fromPoint && fromShape) {
+                        const cp = getConnectionPointById(fromShape, line.fromPoint);
+                        if (cp) {
+                          startPt = cp;
+                        }
+                      }
+                      if (line.toId && line.toPoint && toShape) {
+                        const cp = getConnectionPointById(toShape, line.toPoint);
+                        if (cp) {
+                          endPt = cp;
+                        }
+                      }
+                      const oldStart = { x: line.x, y: line.y };
+                      const oldEnd = { x: line.x + line.width, y: line.y + line.height };
+                      const hasWaypoints = (line.waypoints?.length ?? 0) > 0;
+                      const waypoints = hasWaypoints
+                        ? preserveWaypointBend(line.waypoints!, oldStart, oldEnd, startPt, endPt)
+                        : [];
+                      overrides[line.id] = {
+                        x: startPt.x,
+                        y: startPt.y,
+                        width: endPt.x - startPt.x,
+                        height: endPt.y - startPt.y,
+                        waypoints,
+                      };
+                    }
+                    setLineOverrides((prev) => ({ ...prev, ...overrides }));
+                    return;
+                  }
                   if (selectedObjectIds.length !== 1) return;
                   const node = e.target;
                   const currentRotation = node.rotation();
@@ -1248,7 +1514,19 @@ export function Canvas({
                         },
                       });
                     });
+                    const shapeUpdates = changes.map((c) => ({
+                      id: c.id,
+                      x: c.updates.x!,
+                      y: c.updates.y!,
+                      width: c.updates.width!,
+                      height: c.updates.height!,
+                      rotation: c.updates.rotation!,
+                    }));
+                    const lineUpdates = computeConnectedLineUpdates(shapeUpdates, objects);
+                    changes.push(...lineUpdates);
                     if (changes.length > 0 && onBatchObjectUpdate) onBatchObjectUpdate(changes);
+                    setLineOverrides({});
+                    multiSelectDisplayRef.current.clear();
                   }
 
                   isTransformingRef.current = false;
@@ -1314,6 +1592,32 @@ export function Canvas({
             </>
           );
         })()}
+        {/* Draggable overlay for multi-select marquee — hit area inset to avoid blocking Transformer anchors */}
+        {selectedObjectIds.length > 1 && multiSelectBounds && (
+          <KonvaRect
+            id="multi-select-drag-rect"
+            x={multiSelectBounds.x}
+            y={multiSelectBounds.y}
+            width={multiSelectBounds.width}
+            height={multiSelectBounds.height}
+            fill="transparent"
+            listening
+            draggable
+            hitFunc={(context, shape) => {
+              const inset = 12;
+              const w = shape.width();
+              const h = shape.height();
+              if (w <= 2 * inset || h <= 2 * inset) return;
+              context.beginPath();
+              context.rect(inset, inset, w - 2 * inset, h - 2 * inset);
+              context.closePath();
+              context.fillStrokeShape(shape);
+            }}
+            onDragStart={handleMultiSelectMarqueeDragStart}
+            onDragMove={handleMultiSelectMarqueeDragMove}
+            onDragEnd={handleMultiSelectMarqueeDragEnd}
+          />
+        )}
         {/* Custom handles for selected line */}
         {renderLineHandles()}
         {/* Drawing connection line (visual feedback while dragging from X) */}
@@ -1327,14 +1631,27 @@ export function Canvas({
             listening={false}
           />
         )}
-        {/* Connection-point X overlays */}
+        {/* Connection-point X overlays — use display object so X's stick during drag/transform */}
         {objects.map(o => {
           const showXs = (hoveredShapeId === o.id || drawingConnection !== null) && !isDraggingNode;
           if (!showXs) return null;
+          const isSelected = selectedObjectIds.includes(o.id);
+          const remoteXform = remoteTransformByObjectId[o.id];
+          const displayObject =
+            isSelected && selectedObjectIds.length === 1 && liveTransform != null
+              ? { ...o, ...liveTransform }
+              : isSelected && selectedObjectIds.length > 1
+                ? (() => {
+                    const fromRef = multiSelectDisplayRef.current.get(o.id);
+                    return fromRef ? { ...o, ...fromRef } : o;
+                  })()
+                : remoteXform != null
+                  ? { ...o, x: remoteXform.x, y: remoteXform.y, width: remoteXform.width, height: remoteXform.height, rotation: remoteXform.rotation }
+                  : o;
           return (
             <ConnectionPoints
               key={`cp-${o.id}`}
-              object={o}
+              object={displayObject}
               activeSourcePointId={drawingConnection?.fromShapeId === o.id ? drawingConnection.fromPointId : null}
               hasActiveConnection={drawingConnection !== null}
               ignorePointer={isDraggingEndpoint}

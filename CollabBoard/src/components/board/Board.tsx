@@ -28,7 +28,7 @@ function generateId() {
 export function Board() {
   const { boardId = 'default' } = useParams();
   const { user, logout } = useAuth();
-  const { objects, addObject, updateObject, deleteObject, clearObjects } = useBoardObjects(boardId);
+  const { objects, addObject, updateObject, deleteObject, clearObjects, markDragging, unmarkDragging } = useBoardObjects(boardId);
   const { cursors, updateCursor, cleanupCursor } = useCursors(boardId, user);
   const { onlineUsers, cleanupPresence } = usePresence(boardId, user, cursors);
   const { viewport, setPosition, zoomAtPoint } = useViewport(boardId);
@@ -877,6 +877,8 @@ export function Board() {
               onClearTransform={clearTransform}
               onConnectShapes={handleConnectShapes}
               isDraggingShapeFromSidebar={isDraggingShapeFromSidebar}
+              onDragStart={markDragging}
+              onDragEnd={unmarkDragging}
             />
         {contextMenu && (
           <ContextMenu
