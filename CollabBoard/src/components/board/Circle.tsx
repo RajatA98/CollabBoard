@@ -60,8 +60,8 @@ export function Circle({ object, isSelected, onSelect, onUpdate, onDoubleClick, 
         radiusX={rx}
         radiusY={ry}
         fill={object.color}
-        stroke={isSelected ? '#0066ff' : '#ccc'}
-        strokeWidth={isSelected ? 2 : 1}
+        stroke={isSelected ? '#0066ff' : (object.strokeColor || '#ccc')}
+        strokeWidth={isSelected ? 2 : (object.strokeWidth ?? 1)}
       />
       {remoteTransform && (
         <>

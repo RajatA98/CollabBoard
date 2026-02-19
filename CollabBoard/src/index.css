@@ -755,3 +755,367 @@ html, body, #root {
 .canvas-area.dragging-shape {
   cursor: copy;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   Style Bar — Miro-style dark top bar
+   ═══════════════════════════════════════════════════════════════ */
+
+@keyframes sbFadeSlideIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+.style-bar {
+  position: absolute;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(23, 23, 23, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  z-index: 1000;
+  pointer-events: auto;
+  white-space: nowrap;
+  animation: sbFadeSlideIn 0.2s ease-out;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 12px;
+  color: #e0e0e0;
+}
+
+.sb-divider {
+  width: 1px;
+  height: 24px;
+  background: rgba(255, 255, 255, 0.12);
+  margin: 0 2px;
+  flex-shrink: 0;
+}
+
+.sb-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* Generic button */
+.sb-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  color: #bbb;
+  font-size: 14px;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.sb-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+.sb-btn-active {
+  background: rgba(66, 133, 244, 0.2);
+  border-color: rgba(66, 133, 244, 0.5);
+  color: #6ea8fe;
+}
+
+/* Color swatch trigger */
+.sb-color-picker {
+  position: relative;
+}
+.sb-color-swatch {
+  width: 24px;
+  height: 24px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 0;
+  transition: border-color 0.15s;
+}
+.sb-color-swatch:hover {
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+/* Color popover */
+.sb-color-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(30, 30, 30, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  padding: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  z-index: 1010;
+}
+.sb-color-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.sb-color-option {
+  width: 28px;
+  height: 28px;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 0;
+  transition: border-color 0.12s, transform 0.1s;
+}
+.sb-color-option:hover {
+  transform: scale(1.15);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+.sb-color-option-active {
+  border-color: #6ea8fe;
+  box-shadow: 0 0 0 2px rgba(66, 133, 244, 0.3);
+}
+.sb-color-hex-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #888;
+  font-size: 12px;
+}
+.sb-color-hex-input {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  color: #e0e0e0;
+  padding: 4px 6px;
+  font-size: 12px;
+  font-family: monospace;
+}
+.sb-color-hex-input:focus {
+  outline: none;
+  border-color: #6ea8fe;
+}
+
+/* Dropdown */
+.sb-dropdown {
+  position: relative;
+}
+.sb-dropdown-trigger {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: #e0e0e0;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.12s;
+  white-space: nowrap;
+}
+.sb-dropdown-trigger:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+.sb-dropdown-trigger-icon {
+  padding: 4px 6px;
+}
+.sb-dropdown-trigger-icon svg {
+  flex-shrink: 0;
+}
+.sb-dropdown-arrow {
+  font-size: 10px;
+  color: #888;
+}
+.sb-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 140px;
+  background: rgba(30, 30, 30, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  z-index: 1010;
+}
+.sb-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: #ccc;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s;
+}
+.sb-dropdown-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+.sb-dropdown-item-active {
+  background: rgba(66, 133, 244, 0.15);
+  color: #6ea8fe;
+}
+
+/* Compact input fields */
+.sb-field {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.sb-field label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #777;
+  user-select: none;
+  min-width: 10px;
+  text-align: center;
+}
+.sb-input {
+  width: 52px;
+  padding: 4px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
+  font-size: 12px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.08);
+  color: #e0e0e0;
+  transition: border-color 0.15s;
+}
+.sb-input:focus {
+  outline: none;
+  border-color: #6ea8fe;
+  box-shadow: 0 0 0 2px rgba(66, 133, 244, 0.15);
+}
+.sb-input-sm {
+  width: 40px;
+}
+.sb-input::-webkit-inner-spin-button,
+.sb-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.sb-input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+/* Font family select */
+.sb-font-select {
+  padding: 4px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #e0e0e0;
+  cursor: pointer;
+  max-width: 100px;
+  transition: border-color 0.15s;
+}
+.sb-font-select:focus {
+  outline: none;
+  border-color: #6ea8fe;
+}
+.sb-font-select option {
+  background: #222;
+  color: #e0e0e0;
+}
+
+/* B / I / U format buttons */
+.sb-format-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  color: #bbb;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.sb-format-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+.sb-format-btn-active {
+  background: rgba(66, 133, 244, 0.2);
+  border-color: rgba(66, 133, 244, 0.5);
+  color: #6ea8fe;
+}
+
+/* Delete button */
+.sb-delete-wrapper {
+  position: relative;
+}
+.sb-delete-btn {
+  color: #e57373 !important;
+}
+.sb-delete-btn:hover {
+  background: rgba(229, 115, 115, 0.15) !important;
+  color: #ff6b6b !important;
+}
+
+/* Delete confirmation popover */
+.sb-confirm-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(30, 30, 30, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  z-index: 1010;
+  font-size: 12px;
+  color: #ccc;
+  white-space: nowrap;
+}
+.sb-confirm-yes {
+  padding: 3px 10px;
+  border: none;
+  border-radius: 4px;
+  background: #e53935;
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.12s;
+}
+.sb-confirm-yes:hover {
+  background: #f44336;
+}
+.sb-confirm-no {
+  padding: 3px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  background: transparent;
+  color: #ccc;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.12s;
+}
+.sb-confirm-no:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.sb-line-preview {
+  font-family: monospace;
+  letter-spacing: -1px;
+}

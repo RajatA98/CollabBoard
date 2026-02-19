@@ -55,8 +55,8 @@ export function Triangle({ object, isSelected, onSelect, onUpdate, onDoubleClick
         points={[object.width / 2, 0, 0, object.height, object.width, object.height]}
         closed={true}
         fill={object.color}
-        stroke={isSelected ? '#0066ff' : '#ccc'}
-        strokeWidth={isSelected ? 2 : 1}
+        stroke={isSelected ? '#0066ff' : (object.strokeColor || '#ccc')}
+        strokeWidth={isSelected ? 2 : (object.strokeWidth ?? 1)}
       />
       {remoteTransform && (
         <>

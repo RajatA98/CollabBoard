@@ -118,7 +118,7 @@ export function TextElement({
         y={TEXT_ELEMENT_PADDING}
         fontSize={object.fontSize || TEXT_ELEMENT_FONT_SIZE}
         fontFamily={object.fontFamily || TEXT_ELEMENT_FONT_FAMILY}
-        fill={hasContent ? '#333' : '#999'}
+        fill={object.textColor ?? (hasContent ? '#333' : '#999')}
         fontStyle={
           hasContent
             ? [object.bold && 'bold', object.italic && 'italic'].filter(Boolean).join(' ') || 'normal'

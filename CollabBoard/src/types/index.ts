@@ -23,6 +23,11 @@ export interface BoardObject {
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
+  textColor?: string;
+  // Stroke / border fields (shapes & lines)
+  strokeColor?: string;
+  strokeWidth?: number;
+  lineStyle?: 'solid' | 'dashed' | 'dotted';
   // Line-specific fields
   arrowType?: 'none' | 'single' | 'double';
   waypoints?: Waypoint[];

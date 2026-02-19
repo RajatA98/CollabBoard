@@ -7,6 +7,7 @@ interface TextEditorProps {
   height: number;
   text: string;
   color?: string;
+  textColor?: string;
   objectType?: 'sticky' | 'text';
   fontSize?: number;
   fontFamily?: string;
@@ -18,7 +19,7 @@ interface TextEditorProps {
   onTextChange?: (text: string) => void;
 }
 
-export function TextEditor({ x, y, width, height, text, color = '#FFD54F', objectType = 'sticky', fontSize, fontFamily, bold, italic, underline, onSubmit, onCancel, onTextChange }: TextEditorProps) {
+export function TextEditor({ x, y, width, height, text, color = '#FFD54F', textColor, objectType = 'sticky', fontSize, fontFamily, bold, italic, underline, onSubmit, onCancel, onTextChange }: TextEditorProps) {
   const [value, setValue] = useState(text);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [textareaHeight, setTextareaHeight] = useState(height);
@@ -83,7 +84,7 @@ export function TextEditor({ x, y, width, height, text, color = '#FFD54F', objec
         resize: 'none',
         outline: 'none',
         background: isTextType ? 'rgba(255,255,255,0.95)' : color,
-        color: '#333',
+        color: textColor ?? '#333',
         zIndex: 1000,
         boxShadow: isTextType
           ? '0 2px 8px rgba(0,0,0,0.1)'

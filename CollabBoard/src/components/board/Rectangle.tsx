@@ -57,8 +57,8 @@ export function Rectangle({ object, isSelected, onSelect, onUpdate, onDoubleClic
         offsetX={0}
         offsetY={0}
         fill={object.color}
-        stroke={isSelected ? '#0066ff' : '#ccc'}
-        strokeWidth={isSelected ? 2 : 1}
+        stroke={isSelected ? '#0066ff' : (object.strokeColor || '#ccc')}
+        strokeWidth={isSelected ? 2 : (object.strokeWidth ?? 1)}
       />
       {remoteTransform && (
         <>

@@ -113,7 +113,7 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
         y={6}
         fontSize={12}
         fontFamily="'Segoe UI', system-ui, sans-serif"
-        fill="#666"
+        fill={object.textColor ?? '#333'}
         fontStyle="bold"
       />
       {/* Text content */}
@@ -124,7 +124,7 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
         y={26}
         fontSize={object.fontSize || STICKY_FONT_SIZE}
         fontFamily={object.fontFamily || STICKY_FONT_FAMILY}
-        fill={remoteEditing ? '#333' : (object.text ? '#333' : '#999')}
+        fill={object.textColor ?? (remoteEditing ? '#333' : (object.text ? '#333' : '#999'))}
         fontStyle={
           remoteEditing
             ? 'normal'

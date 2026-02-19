@@ -6,7 +6,7 @@ import { TextEditor } from './TextEditor';
 import { PresenceBar } from './PresenceBar';
 import { ShapeSidebar } from './ShapeSidebar';
 import { UndoRedoClearPanel } from './UndoRedoClearPanel';
-import { StylePanel } from './StylePanel';
+import { StyleBar } from './StyleBar';
 import { ContextMenu } from './ContextMenu';
 import { useAuth } from '../../hooks/useAuth';
 import { useBoardObjects } from '../../hooks/useBoardObjects';
@@ -65,7 +65,6 @@ export function Board() {
     objectType: 'sticky' | 'text';
   } | null>(null);
   const [shapesPanelOpen, setShapesPanelOpen] = useState(false);
-  const [stylePanelOpen, setStylePanelOpen] = useState(false);
   const [boardMeta, setBoardMeta] = useState<BoardMeta | null>(null);
   const [isDraggingShapeFromSidebar, setIsDraggingShapeFromSidebar] = useState(false);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
@@ -842,17 +841,40 @@ export function Board() {
         e.preventDefault();
         createObjectAtCenter('text');
       }
+      if (e.key === 'b' && (e.metaKey || e.ctrlKey) && selectedObjectIds.length > 0) {
+        e.preventDefault();
+        const obj = objects.find((o) => o.id === selectedObjectIds[0]);
+        if (obj && (obj.type === 'sticky' || obj.type === 'text')) {
+          handleSelectedObjectUpdate({ bold: !obj.bold });
+        }
+      }
+      if (e.key === 'i' && (e.metaKey || e.ctrlKey) && selectedObjectIds.length > 0) {
+        e.preventDefault();
+        const obj = objects.find((o) => o.id === selectedObjectIds[0]);
+        if (obj && (obj.type === 'sticky' || obj.type === 'text')) {
+          handleSelectedObjectUpdate({ italic: !obj.italic });
+        }
+      }
+      if (e.key === 'u' && (e.metaKey || e.ctrlKey) && selectedObjectIds.length > 0) {
+        e.preventDefault();
+        const obj = objects.find((o) => o.id === selectedObjectIds[0]);
+        if (obj && (obj.type === 'sticky' || obj.type === 'text')) {
+          handleSelectedObjectUpdate({ underline: !obj.underline });
+        }
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
     editingObject,
-    selectedObjectIds.length,
+    selectedObjectIds,
+    objects,
     selectAll,
     handleCopySelected,
     handleCutSelected,
     handlePaste,
     handleDeleteSelected,
+    handleSelectedObjectUpdate,
     duplicateSelectedObjects,
     undo,
     redo,
@@ -946,25 +968,15 @@ export function Board() {
               onDragStart={markDragging}
               onDragEnd={unmarkDragging}
             />
-        {selectedObject && !stylePanelOpen && (
-          <button
-            type="button"
-            className="style-panel-tab"
-            onClick={() => setStylePanelOpen(true)}
-            aria-label="Open style panel"
-            data-testid="style-panel-tab"
-          >
-            <span className="style-panel-tab-arrow" aria-hidden>‹</span>
-          </button>
-        )}
-        {selectedObject && stylePanelOpen && (
-          <StylePanel
+        {selectedObject && (
+          <StyleBar
             key={selectedObjectIds.join(',')}
             selectedObject={selectedObject}
             selectedCount={selectedObjectIds.length}
             onUpdate={handleSelectedObjectUpdate}
+            onDelete={handleDeleteSelected}
             liveTransform={liveTransform}
-            onCollapse={() => setStylePanelOpen(false)}
+            viewport={viewport}
           />
         )}
         {contextMenu && (
@@ -1004,6 +1016,7 @@ export function Board() {
               height={editingObject.height}
               text={editingObject.text}
               color={editingObject.objectType === 'text' ? 'transparent' : editObj?.color}
+              textColor={editObj?.textColor}
               objectType={editingObject.objectType}
               fontSize={editObj?.fontSize}
               fontFamily={editObj?.fontFamily}
