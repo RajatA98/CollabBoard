@@ -5,6 +5,8 @@ import { GridBackground } from './GridBackground';
 import { StickyNote } from './StickyNote';
 import { Rectangle } from './Rectangle';
 import { Circle } from './Circle';
+import { Triangle } from './Triangle';
+import { StarShape } from './StarShape';
 import { LineShape, buildLinePointObjects } from './LineShape';
 import { ConnectionPoints } from './ConnectionPoints';
 import { TextElement } from './TextElement';
@@ -1258,6 +1260,10 @@ export function Canvas({
                 return <TextElement {...commonProps} remoteEditing={remoteEdit} />;
               case 'circle':
                 return <Circle {...commonProps} />;
+              case 'triangle':
+                return <Triangle {...commonProps} />;
+              case 'star':
+                return <StarShape {...commonProps} />;
               case 'line':
                 return <LineShape {...commonProps} object={displayObj} />;
               default:
@@ -1306,6 +1312,10 @@ export function Canvas({
                       return <TextElement {...selectedCommon} remoteEditing={remoteEdit} />;
                     case 'circle':
                       return <Circle {...selectedCommon} />;
+                    case 'triangle':
+                      return <Triangle {...selectedCommon} />;
+                    case 'star':
+                      return <StarShape {...selectedCommon} />;
                     case 'line':
                       return <LineShape {...selectedCommon} object={displayObject} />;
                     default:

@@ -9,7 +9,7 @@ import {
 } from '../firebase/firestore';
 import type { BoardObject } from '../types';
 
-const BOARD_OBJECT_TYPES: BoardObject['type'][] = ['sticky', 'rectangle', 'circle', 'line', 'text'];
+const BOARD_OBJECT_TYPES: BoardObject['type'][] = ['sticky', 'rectangle', 'circle', 'line', 'text', 'triangle', 'star'];
 
 /** Ensure object has required numeric/string fields so connection points and shapes never get undefined/NaN from Firestore. */
 function normalizeBoardObject(raw: Record<string, unknown>, id: string): BoardObject {

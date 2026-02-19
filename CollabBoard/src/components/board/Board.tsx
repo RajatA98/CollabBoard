@@ -151,7 +151,7 @@ export function Board() {
     selectedCount: selectedObjectIds.length,
   });
 
-  const createObjectAtCenter = useCallback((type: 'rectangle' | 'sticky' | 'text' | 'circle' | 'line' | 'arrow-single' | 'arrow-double') => {
+  const createObjectAtCenter = useCallback((type: 'rectangle' | 'sticky' | 'text' | 'circle' | 'line' | 'arrow-single' | 'arrow-double' | 'triangle' | 'star') => {
     if (!user) {
       console.error('❌ No user found - cannot create object');
       return;
@@ -244,6 +244,41 @@ export function Board() {
         updatedBy: user.uid,
       };
       console.log('📏 Creating line/arrow:', newObject);
+    } else if (type === 'triangle') {
+      const triWidth = 150;
+      const triHeight = 130;
+      newObject = {
+        id,
+        type: 'triangle',
+        x: worldCenterX - (triWidth / 2),
+        y: worldCenterY - (triHeight / 2),
+        width: triWidth,
+        height: triHeight,
+        rotation: 0,
+        color: '#81C784',
+        createdBy: user.uid,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        updatedBy: user.uid,
+      };
+      console.log('🔺 Creating triangle:', newObject);
+    } else if (type === 'star') {
+      const starSize = 150;
+      newObject = {
+        id,
+        type: 'star',
+        x: worldCenterX - (starSize / 2),
+        y: worldCenterY - (starSize / 2),
+        width: starSize,
+        height: starSize,
+        rotation: 0,
+        color: '#FFB74D',
+        createdBy: user.uid,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        updatedBy: user.uid,
+      };
+      console.log('⭐ Creating star:', newObject);
     } else {
       const rectWidth = 200;
       const rectHeight = 150;
@@ -540,7 +575,7 @@ export function Board() {
   );
 
   const handleShapeDrop = useCallback(
-    (shapeType: 'rectangle' | 'sticky' | 'text' | 'circle' | 'line' | 'arrow-single' | 'arrow-double', screenX: number, screenY: number) => {
+    (shapeType: 'rectangle' | 'sticky' | 'text' | 'circle' | 'line' | 'arrow-single' | 'arrow-double' | 'triangle' | 'star', screenX: number, screenY: number) => {
       if (!user) {
         console.error('❌ No user found - cannot create object');
         return;
@@ -630,6 +665,39 @@ export function Board() {
           updatedAt: Date.now(),
           updatedBy: user.uid,
         };
+      } else if (shapeType === 'triangle') {
+        const triWidth = 150;
+        const triHeight = 130;
+        newObject = {
+          id,
+          type: 'triangle',
+          x: worldPos.x - triWidth / 2,
+          y: worldPos.y - triHeight / 2,
+          width: triWidth,
+          height: triHeight,
+          rotation: 0,
+          color: '#81C784',
+          createdBy: user.uid,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          updatedBy: user.uid,
+        };
+      } else if (shapeType === 'star') {
+        const starSize = 150;
+        newObject = {
+          id,
+          type: 'star',
+          x: worldPos.x - starSize / 2,
+          y: worldPos.y - starSize / 2,
+          width: starSize,
+          height: starSize,
+          rotation: 0,
+          color: '#FFB74D',
+          createdBy: user.uid,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          updatedBy: user.uid,
+        };
       } else {
         const rectWidth = 200;
         const rectHeight = 150;
@@ -684,7 +752,7 @@ export function Board() {
       const now = Date.now();
       if (now - lastDropHandledAtRef.current < 300) return;
       lastDropHandledAtRef.current = now;
-      const shapeType = e.dataTransfer.getData('shape-type') as 'rectangle' | 'sticky' | 'text' | 'circle' | 'line' | 'arrow-single' | 'arrow-double';
+      const shapeType = e.dataTransfer.getData('shape-type') as 'rectangle' | 'sticky' | 'text' | 'circle' | 'line' | 'arrow-single' | 'arrow-double' | 'triangle' | 'star';
       if (shapeType && canvasContainerRef.current) {
         const rect = canvasContainerRef.current.getBoundingClientRect();
         const x = e.clientX - rect.left;

@@ -119,6 +119,87 @@ function getLinePoints(obj: BoardObject): ConnectionPoint[] {
 }
 
 /**
+ * Return local-space vertices for polygon-based shapes.
+ * To support a new shape, add its vertex list here — connection points are
+ * computed automatically (N corners + N edge midpoints = 2N points).
+ */
+function getShapeVertices(obj: BoardObject): { x: number; y: number }[] | null {
+  const w = num(obj.width, 100);
+  const h = num(obj.height, 100);
+
+  switch (obj.type) {
+    case 'triangle':
+      return [
+        { x: w / 2, y: 0 },
+        { x: 0, y: h },
+        { x: w, y: h },
+      ];
+    case 'star': {
+      const cx = w / 2;
+      const cy = h / 2;
+      const outerR = Math.min(w, h) / 2;
+      const innerR = outerR * 0.4;
+      const verts: { x: number; y: number }[] = [];
+      for (let i = 0; i < 10; i++) {
+        const angle = -Math.PI / 2 + (i * Math.PI) / 5;
+        const r = i % 2 === 0 ? outerR : innerR;
+        verts.push({ x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) });
+      }
+      return verts;
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * Generic connection points for any polygon defined by its vertices.
+ * Produces N corner points + N edge midpoints = 2N total.
+ * Translates from local space to world space and applies rotation.
+ */
+function getPolygonPoints(obj: BoardObject, localVerts: { x: number; y: number }[]): ConnectionPoint[] {
+  const ox = num(obj.x, 0);
+  const oy = num(obj.y, 0);
+  const rot = num(obj.rotation, 0);
+  const n = localVerts.length;
+
+  const centroidX = localVerts.reduce((s, v) => s + v.x, 0) / n;
+  const centroidY = localVerts.reduce((s, v) => s + v.y, 0) / n;
+
+  const toWorld = (lx: number, ly: number) => {
+    const wx = ox + lx;
+    const wy = oy + ly;
+    if (rot === 0) return { x: wx, y: wy };
+    return rotatePoint(wx, wy, ox, oy, rot);
+  };
+
+  const directionFor = (lx: number, ly: number): Direction => {
+    const angle = Math.atan2(ly - centroidY, lx - centroidX);
+    const deg = ((angle * 180) / Math.PI + 360) % 360;
+    return directionFromAngle(deg);
+  };
+
+  const pts: ConnectionPoint[] = [];
+
+  for (let i = 0; i < n; i++) {
+    const v = localVerts[i];
+    const w = toWorld(v.x, v.y);
+    pts.push({ id: `corner-${i}`, x: w.x, y: w.y, direction: directionFor(v.x, v.y) });
+  }
+
+  for (let i = 0; i < n; i++) {
+    const a = localVerts[i];
+    const b = localVerts[(i + 1) % n];
+    const mx = (a.x + b.x) / 2;
+    const my = (a.y + b.y) / 2;
+    const w = toWorld(mx, my);
+    pts.push({ id: `edge-${i}`, x: w.x, y: w.y, direction: directionFor(mx, my) });
+  }
+
+  return pts;
+}
+
+/**
  * Returns connection points for any shape type.
  */
 export function getConnectionPoints(obj: BoardObject): ConnectionPoint[] {
@@ -127,8 +208,11 @@ export function getConnectionPoints(obj: BoardObject): ConnectionPoint[] {
       return getCirclePoints(obj);
     case 'line':
       return getLinePoints(obj);
-    default:
+    default: {
+      const verts = getShapeVertices(obj);
+      if (verts) return getPolygonPoints(obj, verts);
       return getRectPoints(obj);
+    }
   }
 }
 
