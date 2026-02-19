@@ -700,12 +700,10 @@ export function Board() {
       if (selectedObjectIds.length === 1) {
         handleObjectUpdate(selectedObjectIds[0], updates);
       } else {
-        // Multi-select: apply color to all selected shapes
-        if ('color' in updates && updates.color !== undefined) {
-          handleBatchObjectUpdate(
-            selectedObjectIds.map((id) => ({ id, updates: { color: updates.color! } }))
-          );
-        }
+        // Multi-select: apply all updates to all selected objects
+        handleBatchObjectUpdate(
+          selectedObjectIds.map((id) => ({ id, updates }))
+        );
       }
     },
     [selectedObjectIds, handleObjectUpdate, handleBatchObjectUpdate]
@@ -881,7 +879,6 @@ export function Board() {
           <FloatingToolbar
             key={selectedObjectIds.join(',')}
             selectedObject={selectedObject}
-            selectedCount={selectedObjectIds.length}
             onUpdate={handleSelectedObjectUpdate}
             liveTransform={liveTransform}
             viewport={viewport}

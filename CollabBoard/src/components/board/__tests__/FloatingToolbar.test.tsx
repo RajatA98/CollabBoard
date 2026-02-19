@@ -27,7 +27,7 @@ describe('FloatingToolbar', () => {
     render(
       <FloatingToolbar
         selectedObject={makeObject()}
-        selectedCount={1}
+
         onUpdate={onUpdate}
         viewport={mockViewport}
 
@@ -41,7 +41,7 @@ describe('FloatingToolbar', () => {
     render(
       <FloatingToolbar
         selectedObject={makeObject({ type: 'rectangle' })}
-        selectedCount={1}
+
         onUpdate={onUpdate}
         viewport={mockViewport}
 
@@ -57,7 +57,7 @@ describe('FloatingToolbar', () => {
     render(
       <FloatingToolbar
         selectedObject={makeObject({ type: 'line', arrowType: 'none' })}
-        selectedCount={1}
+
         onUpdate={onUpdate}
         viewport={mockViewport}
 
@@ -73,7 +73,7 @@ describe('FloatingToolbar', () => {
     render(
       <FloatingToolbar
         selectedObject={makeObject()}
-        selectedCount={1}
+
         onUpdate={onUpdate}
         viewport={mockViewport}
 
@@ -87,7 +87,7 @@ describe('FloatingToolbar', () => {
     render(
       <FloatingToolbar
         selectedObject={makeObject()}
-        selectedCount={1}
+
         onUpdate={onUpdate}
         viewport={mockViewport}
 
@@ -103,7 +103,7 @@ describe('FloatingToolbar', () => {
     render(
       <FloatingToolbar
         selectedObject={makeObject({ y: 200 })}
-        selectedCount={1}
+
         onUpdate={onUpdate}
         viewport={mockViewport}
 
@@ -113,22 +113,20 @@ describe('FloatingToolbar', () => {
     expect(yInput.value).toBe('-200');
   });
 
-  it('multi-select shows only color', () => {
+  it('shows all controls (multi-select applies to all objects via Board)', () => {
     const onUpdate = vi.fn();
     render(
       <FloatingToolbar
         selectedObject={makeObject()}
-        selectedCount={3}
         onUpdate={onUpdate}
         viewport={mockViewport}
-
       />
     );
     expect(screen.getByLabelText('Color')).toBeInTheDocument();
-    expect(screen.queryByLabelText('X')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Y')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Rotation')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Rectangle')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('X')).toBeInTheDocument();
+    expect(screen.getByLabelText('Y')).toBeInTheDocument();
+    expect(screen.getByLabelText('Rotation')).toBeInTheDocument();
+    expect(screen.getByLabelText('Rectangle')).toBeInTheDocument();
   });
 
   it('should call onUpdate when color changes', () => {
@@ -136,7 +134,7 @@ describe('FloatingToolbar', () => {
     render(
       <FloatingToolbar
         selectedObject={makeObject()}
-        selectedCount={1}
+
         onUpdate={onUpdate}
         viewport={mockViewport}
 
@@ -152,7 +150,7 @@ describe('FloatingToolbar', () => {
     render(
       <FloatingToolbar
         selectedObject={makeObject({ x: 100 })}
-        selectedCount={1}
+
         onUpdate={onUpdate}
         viewport={mockViewport}
 
@@ -169,7 +167,7 @@ describe('FloatingToolbar', () => {
     render(
       <FloatingToolbar
         selectedObject={makeObject({ y: 200 })}
-        selectedCount={1}
+
         onUpdate={onUpdate}
         viewport={mockViewport}
 
@@ -186,7 +184,7 @@ describe('FloatingToolbar', () => {
     render(
       <FloatingToolbar
         selectedObject={makeObject({ rotation: 0 })}
-        selectedCount={1}
+
         onUpdate={onUpdate}
         viewport={mockViewport}
 
@@ -203,7 +201,7 @@ describe('FloatingToolbar', () => {
     render(
       <FloatingToolbar
         selectedObject={makeObject({ type: 'rectangle' })}
-        selectedCount={1}
+
         onUpdate={onUpdate}
         viewport={mockViewport}
 
@@ -218,7 +216,7 @@ describe('FloatingToolbar', () => {
     render(
       <FloatingToolbar
         selectedObject={makeObject({ type: 'line', arrowType: 'none' })}
-        selectedCount={1}
+
         onUpdate={onUpdate}
         viewport={mockViewport}
 
@@ -233,7 +231,7 @@ describe('FloatingToolbar', () => {
     render(
       <FloatingToolbar
         selectedObject={makeObject({ type: 'sticky', text: 'hello' })}
-        selectedCount={1}
+
         onUpdate={onUpdate}
         viewport={mockViewport}
 
@@ -251,7 +249,7 @@ describe('FloatingToolbar', () => {
     render(
       <FloatingToolbar
         selectedObject={makeObject({ type: 'text', text: 'hello' })}
-        selectedCount={1}
+
         onUpdate={onUpdate}
         viewport={mockViewport}
 
@@ -266,7 +264,7 @@ describe('FloatingToolbar', () => {
     render(
       <FloatingToolbar
         selectedObject={makeObject({ type: 'rectangle' })}
-        selectedCount={1}
+
         onUpdate={onUpdate}
         viewport={mockViewport}
 
@@ -281,7 +279,7 @@ describe('FloatingToolbar', () => {
     render(
       <FloatingToolbar
         selectedObject={makeObject({ type: 'sticky', text: 'hello', bold: false })}
-        selectedCount={1}
+
         onUpdate={onUpdate}
         viewport={mockViewport}
 
@@ -296,7 +294,7 @@ describe('FloatingToolbar', () => {
     render(
       <FloatingToolbar
         selectedObject={makeObject({ type: 'text', text: 'hello', italic: false })}
-        selectedCount={1}
+
         onUpdate={onUpdate}
         viewport={mockViewport}
 
@@ -311,7 +309,7 @@ describe('FloatingToolbar', () => {
     render(
       <FloatingToolbar
         selectedObject={makeObject({ type: 'sticky', text: 'hello', underline: false })}
-        selectedCount={1}
+
         onUpdate={onUpdate}
         viewport={mockViewport}
 
@@ -326,7 +324,7 @@ describe('FloatingToolbar', () => {
     render(
       <FloatingToolbar
         selectedObject={makeObject({ x: 100, y: 200, rotation: 0 })}
-        selectedCount={1}
+
         onUpdate={onUpdate}
         liveTransform={{ x: 150, y: 250, width: 300, height: 150, rotation: 30 }}
         viewport={mockViewport}

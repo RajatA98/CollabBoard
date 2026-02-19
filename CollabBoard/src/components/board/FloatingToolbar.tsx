@@ -4,7 +4,6 @@ import type { BoardObject } from '../../types';
 
 interface FloatingToolbarProps {
   selectedObject: BoardObject;
-  selectedCount: number;
   onUpdate: (updates: Partial<BoardObject>) => void;
   liveTransform?: {
     width: number;
@@ -65,12 +64,10 @@ const ArrowDoubleIcon = () => (
 
 export function FloatingToolbar({
   selectedObject,
-  selectedCount,
   onUpdate,
   liveTransform,
   viewport,
 }: FloatingToolbarProps) {
-  const isMulti = selectedCount > 1;
   const toolbarRef = useRef<HTMLDivElement>(null);
 
   const isTextType = selectedObject.type === 'sticky' || selectedObject.type === 'text';
@@ -197,8 +194,8 @@ export function FloatingToolbar({
       style={{ left: pos.left, top: pos.top }}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      {/* Shape / Line type selector (single-select only) */}
-      {!isMulti && !isTextType && (
+      {/* Shape / Line type selector */}
+      {!isTextType && (
         <>
           <div className="floating-toolbar-group">
             {isLineType ? (
@@ -279,11 +276,9 @@ export function FloatingToolbar({
         />
       </div>
 
-      {!isMulti && (
-        <>
-          <div className="floating-toolbar-divider" />
+      <div className="floating-toolbar-divider" />
 
-          {/* X / Y / Rotation */}
+      {/* X / Y / Rotation */}
           <div className="floating-toolbar-group">
             <div className="floating-toolbar-field">
               <label>X</label>
@@ -391,8 +386,6 @@ export function FloatingToolbar({
               </div>
             </>
           )}
-        </>
-      )}
     </div>
   );
 }
