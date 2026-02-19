@@ -420,16 +420,18 @@ export function Canvas({
     };
   }, []);
 
-  // Attach transformer only for single selection
+  // Attach transformer to selected node(s): one or many (multi-select)
   useEffect(() => {
     const stage = stageRef.current;
     const transformer = transformerRef.current;
     if (!stage || !transformer) return;
-    if (selectedObjectIds.length === 1) {
-      const node = stage.findOne('#' + selectedObjectIds[0]);
-      transformer.nodes(node ? [node] : []);
-    } else {
+    if (selectedObjectIds.length === 0) {
       transformer.nodes([]);
+    } else {
+      const nodes = selectedObjectIds
+        .map((id) => stage.findOne('#' + id))
+        .filter((n): n is Konva.Node => n != null);
+      transformer.nodes(nodes);
     }
     transformer.getLayer()?.batchDraw();
   }, [selectedObjectIds]);
@@ -455,6 +457,21 @@ export function Canvas({
     width: Math.abs(marqueeEnd.x - marqueeStart.x),
     height: Math.abs(marqueeEnd.y - marqueeStart.y),
   } : null;
+
+  // Bounding box for multi-select: dashed box around all selected shapes
+  const multiSelectBounds = useMemo(() => {
+    if (selectedObjectIds.length <= 1) return null;
+    const selected = objects.filter((o) => selectedObjectIds.includes(o.id));
+    if (selected.length === 0) return null;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    selected.forEach((obj) => {
+      minX = Math.min(minX, obj.x);
+      minY = Math.min(minY, obj.y);
+      maxX = Math.max(maxX, obj.x + obj.width);
+      maxY = Math.max(maxY, obj.y + obj.height);
+    });
+    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+  }, [objects, selectedObjectIds]);
 
   return (
     <div style={{ width: '100%', height: '100%', pointerEvents: isDraggingShapeFromSidebar ? 'none' : 'auto' }}>
@@ -623,120 +640,124 @@ export function Canvas({
                     remoteTransform={remoteXform}
                   />
                 )}
-                {selectedObjectIds.length === 1 && (
-                <>
-                <Transformer
-                  ref={transformerRef}
-                  keepRatio={!isAltDown}
-                  borderStroke="#4285f4"
-                  borderStrokeWidth={2}
-                  borderDash={[6, 4]}
-                  anchorFill="#ffffff"
-                  anchorStroke="#4285f4"
-                  anchorStrokeWidth={1.5}
-                  anchorSize={8}
-                  anchorCornerRadius={50}
-                  enabledAnchors={[
-                    'top-left',
-                    'top-center',
-                    'top-right',
-                    'middle-left',
-                    'middle-right',
-                    'bottom-left',
-                    'bottom-center',
-                    'bottom-right',
-                  ]}
-                  rotateEnabled={true}
-                  rotateLineVisible={false}
-                  rotateAnchorAngle={
-                    (() => {
-                      const w = liveTransform?.width ?? obj.width;
-                      const h = liveTransform?.height ?? obj.height;
-                      return (Math.atan2(w, h) * 180) / Math.PI;
-                    })()
+              </React.Fragment>
+              );
+            })}
+        {/* Dashed bounding box when multiple shapes selected (marquee-style) */}
+        {selectedObjectIds.length > 1 && multiSelectBounds && (
+          <SelectionRect
+            x={multiSelectBounds.x}
+            y={multiSelectBounds.y}
+            width={multiSelectBounds.width}
+            height={multiSelectBounds.height}
+            visible
+          />
+        )}
+        {/* Single Transformer for one or many selected; multi = keep aspect ratio + rotate all */}
+        {selectedObjectIds.length >= 1 && (() => {
+          const singleObj = selectedObjectIds.length === 1 ? objects.find((o) => o.id === selectedObjectIds[0]) : null;
+          return (
+            <>
+              <Transformer
+                ref={transformerRef}
+                keepRatio={selectedObjectIds.length > 1 ? true : !isAltDown}
+                borderStroke="#4285f4"
+                borderStrokeWidth={2}
+                borderDash={[6, 4]}
+                anchorFill="#ffffff"
+                anchorStroke="#4285f4"
+                anchorStrokeWidth={1.5}
+                anchorSize={8}
+                anchorCornerRadius={50}
+                enabledAnchors={[
+                  'top-left',
+                  'top-center',
+                  'top-right',
+                  'middle-left',
+                  'middle-right',
+                  'bottom-left',
+                  'bottom-center',
+                  'bottom-right',
+                ]}
+                rotateEnabled={true}
+                rotateLineVisible={false}
+                rotateAnchorAngle={
+                  singleObj
+                    ? (() => {
+                        const w = liveTransform?.width ?? singleObj.width;
+                        const h = liveTransform?.height ?? singleObj.height;
+                        return (Math.atan2(w, h) * 180) / Math.PI;
+                      })()
+                    : 0
+                }
+                rotateAnchorOffset={24}
+                boundBoxFunc={(oldBox, newBox) => {
+                  if (newBox.width < MIN_OBJECT_SIZE || newBox.height < MIN_OBJECT_SIZE) return oldBox;
+                  return newBox;
+                }}
+                onTransformStart={() => {
+                  isTransformingRef.current = true;
+                  if (selectedObjectIds.length === 1) transformingObjectIdRef.current = selectedObjectIds[0];
+                  startDimensionLabelRafLoop();
+                  const activeAnchor = transformerRef.current?.getActiveAnchor?.() ?? null;
+                  if (activeAnchor === 'rotater') {
+                    isRotatingGestureRef.current = true;
+                    setTransformMode('rotate');
+                  } else {
+                    isRotatingGestureRef.current = false;
                   }
-                  rotateAnchorOffset={24}
-                  boundBoxFunc={(oldBox, newBox) => {
-                    // Enforce minimum size so objects (especially sticky notes) don't collapse
-                    if (newBox.width < MIN_OBJECT_SIZE || newBox.height < MIN_OBJECT_SIZE) {
-                      return oldBox;
-                    }
-                    return newBox;
-                  }}
-                  onTransformStart={() => {
-                    isTransformingRef.current = true;
-                    transformingObjectIdRef.current = obj.id;
-                    startDimensionLabelRafLoop();
-                    const activeAnchor = transformerRef.current?.getActiveAnchor?.() ?? null;
-                    if (activeAnchor === 'rotater') {
-                      isRotatingGestureRef.current = true;
-                      setTransformMode('rotate');
-                    } else {
-                      isRotatingGestureRef.current = false;
-                    }
-                  }}
-                  onTransform={(e) => {
-                    const node = e.target;
-                    const currentRotation = node.rotation();
-                    // Detect if rotation changed (rotation mode) or size changed (resize mode).
-                    // Once we're in rotate mode this gesture, stay in rotate so the label doesn't flip back to dimensions.
-                    if (Math.abs(currentRotation - lastRotationRef.current) > 0.1) {
-                      isRotatingGestureRef.current = true;
-                      setTransformMode('rotate');
-                    } else if (!isRotatingGestureRef.current) {
-                      setTransformMode('resize');
-                    }
-                    lastRotationRef.current = currentRotation;
+                }}
+                onTransform={(e) => {
+                  if (selectedObjectIds.length !== 1) return;
+                  const node = e.target;
+                  const currentRotation = node.rotation();
+                  if (Math.abs(currentRotation - lastRotationRef.current) > 0.1) {
+                    isRotatingGestureRef.current = true;
+                    setTransformMode('rotate');
+                  } else if (!isRotatingGestureRef.current) {
+                    setTransformMode('resize');
+                  }
+                  lastRotationRef.current = currentRotation;
+                  const scaleX = node.scaleX();
+                  const scaleY = node.scaleY();
+                  const baseW = singleObj!.width;
+                  const baseH = singleObj!.height;
+                  const liveValues = {
+                    x: node.x(),
+                    y: node.y(),
+                    width: Math.max(MIN_OBJECT_SIZE, baseW * scaleX),
+                    height: Math.max(MIN_OBJECT_SIZE, baseH * scaleY),
+                    rotation: currentRotation,
+                  };
+                  liveTransformRef.current = liveValues;
+                  if (!transformFlushScheduledRef.current) {
+                    transformFlushScheduledRef.current = true;
+                    requestAnimationFrame(() => {
+                      transformFlushScheduledRef.current = false;
+                      const current = liveTransformRef.current;
+                      if (current && transformingObjectIdRef.current) {
+                        setLiveTransform({ ...current });
+                        onLiveTransformChange?.(current);
+                        onBroadcastTransform?.(transformingObjectIdRef.current, current.x, current.y, current.width, current.height, current.rotation);
+                      }
+                    });
+                  }
+                }}
+                onTransformEnd={() => {
+                  const transformer = transformerRef.current;
+                  const nodes = transformer?.nodes() ?? [];
+                  if (nodes.length === 0) return;
 
-                    // Use object dimensions as base: Groups (e.g. StickyNote) don't have width/height,
-                    // so node.width()/node.height() can be 0 or wrong and would clamp to MIN_OBJECT_SIZE
+                  if (nodes.length === 1) {
+                    const node = nodes[0];
+                    const obj = objects.find((o) => o.id === node.id());
+                    if (!obj) return;
                     const scaleX = node.scaleX();
                     const scaleY = node.scaleY();
-                    const baseW = obj.width;
-                    const baseH = obj.height;
-
-                    const liveValues = {
-                      x: node.x(),
-                      y: node.y(),
-                      width: Math.max(MIN_OBJECT_SIZE, baseW * scaleX),
-                      height: Math.max(MIN_OBJECT_SIZE, baseH * scaleY),
-                      rotation: currentRotation,
-                    };
-
-                    liveTransformRef.current = liveValues;
-                    // Flush to state/callbacks once per frame for smooth 60fps updates
-                    if (!transformFlushScheduledRef.current) {
-                      transformFlushScheduledRef.current = true;
-                      requestAnimationFrame(() => {
-                        transformFlushScheduledRef.current = false;
-                        const current = liveTransformRef.current;
-                        if (current) {
-                          setLiveTransform({ ...current });
-                          onLiveTransformChange?.(current);
-                          const id = transformingObjectIdRef.current;
-                          if (id) {
-                            onBroadcastTransform?.(id, current.x, current.y, current.width, current.height, current.rotation);
-                          }
-                        }
-                      });
-                    }
-                  }}
-                  onTransformEnd={(e) => {
-                    const node = e.target;
-                    const scaleX = node.scaleX();
-                    const scaleY = node.scaleY();
-
-                    // Reset scale so the node's visual size is correct on next render
                     node.scaleX(1);
                     node.scaleY(1);
-
-                    // Base dimensions from object: Groups don't have reliable node.width()/height()
-                    const baseW = obj.width;
-                    const baseH = obj.height;
-
-                    const newWidth = Math.max(MIN_OBJECT_SIZE, baseW * scaleX);
-                    const newHeight = Math.max(MIN_OBJECT_SIZE, baseH * scaleY);
-
+                    const newWidth = Math.max(MIN_OBJECT_SIZE, obj.width * scaleX);
+                    const newHeight = Math.max(MIN_OBJECT_SIZE, obj.height * scaleY);
                     onObjectUpdate(obj.id, {
                       x: node.x(),
                       y: node.y(),
@@ -744,75 +765,95 @@ export function Canvas({
                       height: newHeight,
                       rotation: node.rotation(),
                     });
-
-                    // Clear live transform
-                    isTransformingRef.current = false;
-                    transformingObjectIdRef.current = null;
-                    liveTransformRef.current = null;
-                    if (dimensionLabelRafRef.current != null) {
-                      cancelAnimationFrame(dimensionLabelRafRef.current);
-                      dimensionLabelRafRef.current = null;
-                    }
-                    setLiveTransform(null);
-                    onLiveTransformChange?.(null);
-                    setTransformMode('idle');
-                    isRotatingGestureRef.current = false;
-                    lastRotationRef.current = node.rotation();
-                    // Clear RTDB transform
-                    onClearTransform?.();
-                  }}
-                  rotateAnchorCursor="grab"
-                  anchorStyleFunc={(anchor) => {
-                    // Match image: thin solid line, almost complete circle, arrowhead at top-right
-                    if ((anchor as Konva.Node).hasName('rotater')) {
-                      (anchor as Konva.Shape).scale({ x: 1.15, y: 1.15 });
-                      (anchor as Konva.Shape).sceneFunc(function (context: Konva.Context, shape: Konva.Shape) {
-                        const w = shape.getAttr('width') ?? 10;
-                        const h = shape.getAttr('height') ?? 10;
-                        const size = Math.min(w, h, 14);
-                        const cx = size / 2;
-                        const cy = size / 2;
-                        const r = Math.max(2.5, size / 2 - 0.5);
-                        // Almost complete circle: from bottom-right (~45°) clockwise to top-right (~315°)
-                        const startAngle = (45 * Math.PI) / 180;
-                        const endAngle = (315 * Math.PI) / 180;
-                        shape.fill('transparent');
-                        shape.stroke('#4285f4');
-                        shape.strokeWidth(1.25);
-                        context.beginPath();
-                        context.arc(cx, cy, r, startAngle, endAngle, false);
-                        context.fillStrokeShape(shape);
-                        // Small arrowhead at top-right segment (end of arc)
-                        const tipX = cx + r * Math.cos(endAngle);
-                        const tipY = cy - r * Math.sin(endAngle);
-                        const arrowLen = size * 0.35;
-                        const leftX = tipX - arrowLen * Math.cos(endAngle - 0.4);
-                        const leftY = tipY + arrowLen * Math.sin(endAngle - 0.4);
-                        const rightX = tipX - arrowLen * Math.cos(endAngle + 0.4);
-                        const rightY = tipY + arrowLen * Math.sin(endAngle + 0.4);
-                        context.beginPath();
-                        context.moveTo(tipX, tipY);
-                        context.lineTo(leftX, leftY);
-                        context.lineTo(rightX, rightY);
-                        context.closePath();
-                        context.setAttr('fillStyle', '#4285f4');
-                        context.fill();
+                  } else {
+                    const changes: { id: string; updates: Partial<BoardObject> }[] = [];
+                    nodes.forEach((node: Konva.Node) => {
+                      const id = node.id();
+                      const obj = objects.find((o) => o.id === id);
+                      if (!obj) return;
+                      const scaleX = node.scaleX();
+                      const scaleY = node.scaleY();
+                      node.scaleX(1);
+                      node.scaleY(1);
+                      const newWidth = Math.max(MIN_OBJECT_SIZE, obj.width * scaleX);
+                      const newHeight = Math.max(MIN_OBJECT_SIZE, obj.height * scaleY);
+                      changes.push({
+                        id,
+                        updates: {
+                          x: node.x(),
+                          y: node.y(),
+                          width: newWidth,
+                          height: newHeight,
+                          rotation: node.rotation(),
+                        },
                       });
-                    }
-                  }}
-                />
+                    });
+                    if (changes.length > 0 && onBatchObjectUpdate) onBatchObjectUpdate(changes);
+                  }
+
+                  isTransformingRef.current = false;
+                  transformingObjectIdRef.current = null;
+                  liveTransformRef.current = null;
+                  if (dimensionLabelRafRef.current != null) {
+                    cancelAnimationFrame(dimensionLabelRafRef.current);
+                    dimensionLabelRafRef.current = null;
+                  }
+                  setLiveTransform(null);
+                  onLiveTransformChange?.(null);
+                  setTransformMode('idle');
+                  isRotatingGestureRef.current = false;
+                  if (nodes.length === 1) lastRotationRef.current = nodes[0].rotation();
+                  onClearTransform?.();
+                }}
+                rotateAnchorCursor="grab"
+                anchorStyleFunc={(anchor) => {
+                  if ((anchor as Konva.Node).hasName('rotater')) {
+                    (anchor as Konva.Shape).scale({ x: 1.15, y: 1.15 });
+                    (anchor as Konva.Shape).sceneFunc(function (context: Konva.Context, shape: Konva.Shape) {
+                      const w = shape.getAttr('width') ?? 10;
+                      const h = shape.getAttr('height') ?? 10;
+                      const size = Math.min(w, h, 14);
+                      const cx = size / 2;
+                      const cy = size / 2;
+                      const r = Math.max(2.5, size / 2 - 0.5);
+                      const startAngle = (45 * Math.PI) / 180;
+                      const endAngle = (315 * Math.PI) / 180;
+                      shape.fill('transparent');
+                      shape.stroke('#4285f4');
+                      shape.strokeWidth(1.25);
+                      context.beginPath();
+                      context.arc(cx, cy, r, startAngle, endAngle, false);
+                      context.fillStrokeShape(shape);
+                      const tipX = cx + r * Math.cos(endAngle);
+                      const tipY = cy - r * Math.sin(endAngle);
+                      const arrowLen = size * 0.35;
+                      const leftX = tipX - arrowLen * Math.cos(endAngle - 0.4);
+                      const leftY = tipY + arrowLen * Math.sin(endAngle - 0.4);
+                      const rightX = tipX - arrowLen * Math.cos(endAngle + 0.4);
+                      const rightY = tipY + arrowLen * Math.sin(endAngle + 0.4);
+                      context.beginPath();
+                      context.moveTo(tipX, tipY);
+                      context.lineTo(leftX, leftY);
+                      context.lineTo(rightX, rightY);
+                      context.closePath();
+                      context.setAttr('fillStyle', '#4285f4');
+                      context.fill();
+                    });
+                  }
+                }}
+              />
+              {singleObj && (
                 <DimensionLabel
-                  object={obj}
+                  object={singleObj}
                   transformMode={transformMode}
                   liveTransform={liveTransform}
                   liveTransformRef={liveTransformRef}
                   dimensionLabelTick={dimensionLabelTick}
                 />
-                </>
-                )}
-              </React.Fragment>
-              );
-            })}
+              )}
+            </>
+          );
+        })()}
       </Layer>
       <Layer>
         {Object.entries(remoteCursors).map(([userId, cursor]) => (

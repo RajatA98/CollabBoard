@@ -590,11 +590,19 @@ export function Board() {
 
   const handleSelectedObjectUpdate = useCallback(
     (updates: Partial<BoardObject>) => {
+      if (selectedObjectIds.length === 0) return;
       if (selectedObjectIds.length === 1) {
         handleObjectUpdate(selectedObjectIds[0], updates);
+      } else {
+        // Multi-select: apply color to all selected shapes
+        if ('color' in updates && updates.color !== undefined) {
+          handleBatchObjectUpdate(
+            selectedObjectIds.map((id) => ({ id, updates: { color: updates.color! } }))
+          );
+        }
       }
     },
-    [selectedObjectIds, handleObjectUpdate]
+    [selectedObjectIds, handleObjectUpdate, handleBatchObjectUpdate]
   );
 
   const handleClearBoard = useCallback(async () => {
@@ -690,7 +698,7 @@ export function Board() {
   }, [cleanupPresence, cleanupCursor, cleanupTransform, cleanupEditing, cleanupSelection, logout]);
 
   const selectedObject =
-    selectedObjectIds.length === 1
+    selectedObjectIds.length >= 1
       ? objects.find((obj) => obj.id === selectedObjectIds[0]) || null
       : null;
   const contextMenuObject =
@@ -704,10 +712,6 @@ export function Board() {
         boardName={boardDisplayName}
         onBoardNameChange={handleBoardNameChange}
         onLogout={handleLogout}
-        onUndo={undo}
-        onRedo={redo}
-        canUndo={canUndo}
-        canRedo={canRedo}
       />
       <div className="board-content">
         <ShapeSidebar
@@ -823,8 +827,9 @@ export function Board() {
         )}
         {selectedObject && stylePanelOpen && (
           <StylePanel
-            key={selectedObject.id}
+            key={selectedObjectIds.join(',')}
             selectedObject={selectedObject}
+            selectedCount={selectedObjectIds.length}
             onUpdate={handleSelectedObjectUpdate}
             liveTransform={liveTransform}
             onCollapse={() => setStylePanelOpen(false)}

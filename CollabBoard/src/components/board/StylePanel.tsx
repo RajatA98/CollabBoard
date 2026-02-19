@@ -3,6 +3,8 @@ import type { BoardObject } from '../../types';
 
 interface StylePanelProps {
   selectedObject: BoardObject | null;
+  /** When > 1, panel shows "N items" and only color (applies to all) */
+  selectedCount?: number;
   onUpdate: (updates: Partial<BoardObject>) => void;
   liveTransform?: {
     width: number;
@@ -18,10 +20,12 @@ const MIN_SIZE = 20;
 
 export const StylePanel: React.FC<StylePanelProps> = ({
   selectedObject,
+  selectedCount = 1,
   onUpdate,
   liveTransform,
   onCollapse,
 }) => {
+  const isMulti = selectedCount > 1;
   const [localValues, setLocalValues] = useState(() => ({
     width: selectedObject ? String(Math.round(selectedObject.width)) : '',
     height: selectedObject ? String(Math.round(selectedObject.height)) : '',
@@ -112,7 +116,7 @@ export const StylePanel: React.FC<StylePanelProps> = ({
   return (
     <div className="style-panel" data-testid="style-panel">
       <div className="style-panel-header">
-        <h3>Style</h3>
+        <h3>{isMulti ? `${selectedCount} items` : 'Style'}</h3>
         {onCollapse && (
           <button
             type="button"
@@ -127,6 +131,8 @@ export const StylePanel: React.FC<StylePanelProps> = ({
       </div>
 
       <div className="style-panel-content">
+        {!isMulti && (
+        <>
         {/* Object Type */}
         <div className="property-group">
           <label className="property-label">Type</label>
@@ -134,8 +140,10 @@ export const StylePanel: React.FC<StylePanelProps> = ({
             {selectedObject.type === 'rectangle' ? 'Rectangle' : selectedObject.type === 'sticky' ? 'Sticky Note' : 'Text'}
           </div>
         </div>
+        </>
+        )}
 
-        {/* Color */}
+        {/* Color (single or multi: multi applies to all) */}
         <div className="property-group">
           <label htmlFor="color-input" className="property-label">
             Color
@@ -159,6 +167,8 @@ export const StylePanel: React.FC<StylePanelProps> = ({
           </div>
         </div>
 
+        {!isMulti && (
+        <>
         {/* Dimensions */}
         <div className="property-group">
           <label htmlFor="width-input" className="property-label">
@@ -256,6 +266,8 @@ export const StylePanel: React.FC<StylePanelProps> = ({
             max={180}
           />
         </div>
+        </>
+        )}
       </div>
     </div>
   );

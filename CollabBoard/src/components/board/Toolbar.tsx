@@ -5,20 +5,12 @@ interface ToolbarProps {
   boardName: string;
   onBoardNameChange: (name: string) => void;
   onLogout?: () => void;
-  onUndo?: () => void;
-  onRedo?: () => void;
-  canUndo?: boolean;
-  canRedo?: boolean;
 }
 
 export function Toolbar({
   boardName,
   onBoardNameChange,
   onLogout,
-  onUndo,
-  onRedo,
-  canUndo = false,
-  canRedo = false,
 }: ToolbarProps) {
   const navigate = useNavigate();
   const [isEditing, setIsEditing] = useState(false);
@@ -84,32 +76,6 @@ export function Toolbar({
             title="Click to rename"
           >
             {boardName}
-          </button>
-        )}
-      </div>
-      <div className="toolbar-tools">
-        {onUndo && (
-          <button
-            type="button"
-            className="tool-btn"
-            onClick={onUndo}
-            disabled={!canUndo}
-            aria-label="Undo (⌘Z)"
-            data-testid="toolbar-undo"
-          >
-            Undo <span className="toolbar-shortcut">⌘Z</span>
-          </button>
-        )}
-        {onRedo && (
-          <button
-            type="button"
-            className="tool-btn"
-            onClick={onRedo}
-            disabled={!canRedo}
-            aria-label="Redo (⌘⇧Z)"
-            data-testid="toolbar-redo"
-          >
-            Redo <span className="toolbar-shortcut">⌘⇧Z</span>
           </button>
         )}
       </div>
