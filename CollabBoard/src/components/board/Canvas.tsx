@@ -9,7 +9,6 @@ import { LineShape, buildLinePointObjects } from './LineShape';
 import { ConnectionPoints } from './ConnectionPoints';
 import { TextElement } from './TextElement';
 import { RemoteCursor } from './RemoteCursor';
-import { DimensionLabel } from './DimensionLabel';
 import { SelectionRect } from './SelectionRect';
 import { rectsIntersect } from '../../utils/coordinates';
 import { getConnectionPoints, getConnectionPointById } from '../../utils/connectionPoints';
@@ -119,7 +118,6 @@ export function Canvas({
   const transformerRef = useRef<Konva.Transformer>(null);
   const [stageSize, setStageSize] = useState({ width: window.innerWidth, height: window.innerHeight - 48 });
   const [isAltDown, setIsAltDown] = useState(false);
-  const [transformMode, setTransformMode] = useState<'idle' | 'resize' | 'rotate'>('idle');
   const lastRotationRef = useRef<number>(0);
   const isRotatingGestureRef = useRef(false);
   const [liveTransform, setLiveTransform] = useState<{
@@ -133,8 +131,6 @@ export function Canvas({
   const isTransformingRef = useRef(false);
   const transformFlushScheduledRef = useRef(false);
   const transformingObjectIdRef = useRef<string | null>(null);
-  const [dimensionLabelTick, setDimensionLabelTick] = useState(0);
-  const dimensionLabelRafRef = useRef<number | null>(null);
   const dragStartPositionsRef = useRef<Map<string, { x: number; y: number }> | null>(null);
   const [isMiddleMouseDown, setIsMiddleMouseDown] = useState(false);
   const middleMousePanStartRef = useRef<{ pointerX: number; pointerY: number; viewportX: number; viewportY: number } | null>(null);
@@ -181,17 +177,6 @@ export function Canvas({
       y: (pointer.y - viewport.y) / viewport.scaleY,
     };
   }, [viewport]);
-
-  // One rAF-driven re-render per frame during transform so DimensionLabel reads liveTransformRef without delay
-  const startDimensionLabelRafLoop = useCallback(() => {
-    const loop = () => {
-      setDimensionLabelTick((t) => t + 1);
-      if (isTransformingRef.current) {
-        dimensionLabelRafRef.current = requestAnimationFrame(loop);
-      }
-    };
-    dimensionLabelRafRef.current = requestAnimationFrame(loop);
-  }, []);
 
   // Build lookup: objectId -> LiveTransformData for remote users' live transforms
   const remoteTransformByObjectId = useMemo(() => {
@@ -1162,11 +1147,9 @@ export function Canvas({
                 onTransformStart={() => {
                   isTransformingRef.current = true;
                   if (selectedObjectIds.length === 1) transformingObjectIdRef.current = selectedObjectIds[0];
-                  startDimensionLabelRafLoop();
                   const activeAnchor = transformerRef.current?.getActiveAnchor?.() ?? null;
                   if (activeAnchor === 'rotater') {
                     isRotatingGestureRef.current = true;
-                    setTransformMode('rotate');
                   } else {
                     isRotatingGestureRef.current = false;
                   }
@@ -1177,9 +1160,6 @@ export function Canvas({
                   const currentRotation = node.rotation();
                   if (Math.abs(currentRotation - lastRotationRef.current) > 0.1) {
                     isRotatingGestureRef.current = true;
-                    setTransformMode('rotate');
-                  } else if (!isRotatingGestureRef.current) {
-                    setTransformMode('resize');
                   }
                   lastRotationRef.current = currentRotation;
                   const scaleX = node.scaleX();
@@ -1254,13 +1234,8 @@ export function Canvas({
                   isTransformingRef.current = false;
                   transformingObjectIdRef.current = null;
                   liveTransformRef.current = null;
-                  if (dimensionLabelRafRef.current != null) {
-                    cancelAnimationFrame(dimensionLabelRafRef.current);
-                    dimensionLabelRafRef.current = null;
-                  }
                   setLiveTransform(null);
                   onLiveTransformChange?.(null);
-                  setTransformMode('idle');
                   isRotatingGestureRef.current = false;
                   if (nodes.length === 1) lastRotationRef.current = nodes[0].rotation();
                   onClearTransform?.();
@@ -1302,15 +1277,6 @@ export function Canvas({
                   }
                 }}
               />
-              {singleObj && (
-                <DimensionLabel
-                  object={singleObj}
-                  transformMode={transformMode}
-                  liveTransform={liveTransform}
-                  liveTransformRef={liveTransformRef}
-                  dimensionLabelTick={dimensionLabelTick}
-                />
-              )}
             </>
           );
         })()}

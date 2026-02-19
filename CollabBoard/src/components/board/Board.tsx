@@ -6,7 +6,7 @@ import { TextEditor } from './TextEditor';
 import { PresenceBar } from './PresenceBar';
 import { ShapeSidebar } from './ShapeSidebar';
 import { UndoRedoClearPanel } from './UndoRedoClearPanel';
-import { StylePanel } from './StylePanel';
+import { FloatingToolbar } from './FloatingToolbar';
 import { ContextMenu } from './ContextMenu';
 import { useAuth } from '../../hooks/useAuth';
 import { useBoardObjects } from '../../hooks/useBoardObjects';
@@ -64,7 +64,6 @@ export function Board() {
     text: string;
     objectType: 'sticky' | 'text';
   } | null>(null);
-  const [stylePanelOpen, setStylePanelOpen] = useState(false);
   const [shapesPanelOpen, setShapesPanelOpen] = useState(false);
   const [boardMeta, setBoardMeta] = useState<BoardMeta | null>(null);
   const [isDraggingShapeFromSidebar, setIsDraggingShapeFromSidebar] = useState(false);
@@ -878,6 +877,16 @@ export function Board() {
               onConnectShapes={handleConnectShapes}
               isDraggingShapeFromSidebar={isDraggingShapeFromSidebar}
             />
+        {selectedObject && (
+          <FloatingToolbar
+            key={selectedObjectIds.join(',')}
+            selectedObject={selectedObject}
+            selectedCount={selectedObjectIds.length}
+            onUpdate={handleSelectedObjectUpdate}
+            liveTransform={liveTransform}
+            viewport={viewport}
+          />
+        )}
         {contextMenu && (
           <ContextMenu
             x={contextMenu.x}
@@ -905,46 +914,33 @@ export function Board() {
             onClose={() => setContextMenu(null)}
           />
         )}
-        {editingObject && (
-          <TextEditor
-            x={editingObject.x}
-            y={editingObject.y}
-            width={editingObject.width}
-            height={editingObject.height}
-            text={editingObject.text}
-            color={editingObject.objectType === 'text' ? 'transparent' : objects.find(obj => obj.id === editingObject.id)?.color}
-            objectType={editingObject.objectType}
-            onSubmit={handleTextSubmit}
-            onCancel={() => {
-              clearEditing();
-              setEditingObject(null);
-            }}
-            onTextChange={(text) => editingObject && broadcastEditing(editingObject.id, text)}
-          />
-        )}
+        {editingObject && (() => {
+          const editObj = objects.find(obj => obj.id === editingObject.id);
+          return (
+            <TextEditor
+              x={editingObject.x}
+              y={editingObject.y}
+              width={editingObject.width}
+              height={editingObject.height}
+              text={editingObject.text}
+              color={editingObject.objectType === 'text' ? 'transparent' : editObj?.color}
+              objectType={editingObject.objectType}
+              fontSize={editObj?.fontSize}
+              fontFamily={editObj?.fontFamily}
+              bold={editObj?.bold}
+              italic={editObj?.italic}
+              underline={editObj?.underline}
+              onSubmit={handleTextSubmit}
+              onCancel={() => {
+                clearEditing();
+                setEditingObject(null);
+              }}
+              onTextChange={(text) => editingObject && broadcastEditing(editingObject.id, text)}
+            />
+          );
+        })()}
           </div>
         </div>
-        {selectedObject && !stylePanelOpen && (
-          <button
-            type="button"
-            className="style-panel-tab"
-            onClick={() => setStylePanelOpen(true)}
-            aria-label="Open style panel"
-            data-testid="style-panel-tab"
-          >
-            <span className="style-panel-tab-arrow" aria-hidden>‹</span>
-          </button>
-        )}
-        {selectedObject && stylePanelOpen && (
-          <StylePanel
-            key={selectedObjectIds.join(',')}
-            selectedObject={selectedObject}
-            selectedCount={selectedObjectIds.length}
-            onUpdate={handleSelectedObjectUpdate}
-            liveTransform={liveTransform}
-            onCollapse={() => setStylePanelOpen(false)}
-          />
-        )}
       </div>
     </div>
   );

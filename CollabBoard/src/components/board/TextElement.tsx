@@ -45,8 +45,8 @@ export function TextElement({
     const neededHeight = measureTextHeight({
       text: displayText,
       width: textWidth,
-      fontSize: TEXT_ELEMENT_FONT_SIZE,
-      fontFamily: TEXT_ELEMENT_FONT_FAMILY,
+      fontSize: object.fontSize || TEXT_ELEMENT_FONT_SIZE,
+      fontFamily: object.fontFamily || TEXT_ELEMENT_FONT_FAMILY,
     }) + TEXT_ELEMENT_PADDING * 2;
 
     const requiredHeight = Math.max(TEXT_ELEMENT_MIN_HEIGHT, neededHeight);
@@ -116,10 +116,15 @@ export function TextElement({
         width={object.width - TEXT_ELEMENT_PADDING * 2}
         x={TEXT_ELEMENT_PADDING}
         y={TEXT_ELEMENT_PADDING}
-        fontSize={TEXT_ELEMENT_FONT_SIZE}
-        fontFamily={TEXT_ELEMENT_FONT_FAMILY}
+        fontSize={object.fontSize || TEXT_ELEMENT_FONT_SIZE}
+        fontFamily={object.fontFamily || TEXT_ELEMENT_FONT_FAMILY}
         fill={hasContent ? '#333' : '#999'}
-        fontStyle={hasContent ? 'normal' : 'italic'}
+        fontStyle={
+          hasContent
+            ? [object.bold && 'bold', object.italic && 'italic'].filter(Boolean).join(' ') || 'normal'
+            : 'italic'
+        }
+        textDecoration={object.underline ? 'underline' : ''}
         opacity={remoteEditing ? 0.7 : 1}
         align="left"
         verticalAlign="top"
