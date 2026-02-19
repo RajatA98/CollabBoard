@@ -5,6 +5,7 @@ import { Canvas } from './Canvas';
 import { TextEditor } from './TextEditor';
 import { PresenceBar } from './PresenceBar';
 import { ShapeSidebar } from './ShapeSidebar';
+import { AICommandPanel } from './AICommandPanel';
 import { UndoRedoClearPanel } from './UndoRedoClearPanel';
 import { StylePanel } from './StylePanel';
 import { ContextMenu } from './ContextMenu';
@@ -66,6 +67,7 @@ export function Board() {
   } | null>(null);
   const [stylePanelOpen, setStylePanelOpen] = useState(false);
   const [shapesPanelOpen, setShapesPanelOpen] = useState(false);
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [boardMeta, setBoardMeta] = useState<BoardMeta | null>(null);
   const [isDraggingShapeFromSidebar, setIsDraggingShapeFromSidebar] = useState(false);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
@@ -894,7 +896,10 @@ export function Board() {
           onDragStateChange={setIsDraggingShapeFromSidebar}
           shapesPanelOpen={shapesPanelOpen}
           onShapesPanelOpenChange={setShapesPanelOpen}
+          onAIClick={() => setAiPanelOpen((prev) => !prev)}
+          aiPanelOpen={aiPanelOpen}
         />
+        {aiPanelOpen && <AICommandPanel boardId={boardId} />}
         <div className="board-main">
           <UndoRedoClearPanel
             onUndo={undo}

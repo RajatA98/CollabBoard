@@ -9,6 +9,10 @@ interface ShapeSidebarProps {
   /** Controlled open state for the shapes submenu (e.g. close when canvas is clicked) */
   shapesPanelOpen?: boolean;
   onShapesPanelOpenChange?: (open: boolean) => void;
+  /** Callback to toggle the AI command panel */
+  onAIClick?: () => void;
+  /** Whether the AI panel is currently open */
+  aiPanelOpen?: boolean;
 }
 
 /** Icon-only sticky note (folded corner) for left bar */
@@ -90,6 +94,13 @@ const ArrowDoublePanelIcon = () => (
   </svg>
 );
 
+/** Sparkle icon for AI assistant */
+const AIIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 2l2.09 6.26L20 10.27l-4.91 3.82L16.18 22 12 18.27 7.82 22l1.09-7.91L4 10.27l5.91-1.01L12 2z" fill="#7C4DFF" stroke="#651FFF" />
+  </svg>
+);
+
 interface TooltipButtonProps {
   label: string;
   shortcut?: string;
@@ -162,6 +173,8 @@ export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({
   onDragStateChange,
   shapesPanelOpen: shapesPanelOpenProp,
   onShapesPanelOpenChange,
+  onAIClick,
+  aiPanelOpen,
 }) => {
   const didDragRef = useRef(false);
   const [shapesPanelOpenInternal, setShapesPanelOpenInternal] = useState(false);
@@ -238,6 +251,17 @@ export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({
           data-testid="shape-bar-shapes-btn"
           aria-label="Shapes and lines"
           active={shapesPanelOpen}
+        />
+
+        {/* AI Assistant */}
+        <div className="shape-sidebar-divider" />
+        <TooltipButton
+          label="AI Assistant"
+          icon={<AIIcon />}
+          onClick={() => onAIClick?.()}
+          data-testid="shape-bar-ai-btn"
+          aria-label="AI Assistant"
+          active={aiPanelOpen}
         />
       </div>
 

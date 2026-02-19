@@ -1,32 +1,62 @@
-/**
- * Import function triggers from their respective submodules:
- *
- * import {onCall} from "firebase-functions/v2/https";
- * import {onDocumentWritten} from "firebase-functions/v2/firestore";
- *
- * See a full list of supported triggers at https://firebase.google.com/docs/functions
- */
-
+import * as admin from "firebase-admin";
 import {setGlobalOptions} from "firebase-functions";
-// import {onRequest} from "firebase-functions/https";
-// import * as logger from "firebase-functions/logger";
+import {onCall, HttpsError} from "firebase-functions/v2/https";
+import {runAgent} from "./lib/agentRunner.js";
 
-// Start writing functions
-// https://firebase.google.com/docs/functions/typescript
+admin.initializeApp();
 
-// For cost control, you can set the maximum number of containers that can be
-// running at the same time. This helps mitigate the impact of unexpected
-// traffic spikes by instead downgrading performance. This limit is a
-// per-function limit. You can override the limit for each function using the
-// `maxInstances` option in the function's options, e.g.
-// `onRequest({ maxInstances: 5 }, (req, res) => { ... })`.
-// NOTE: setGlobalOptions does not apply to functions using the v1 API. V1
-// functions should each use functions.runWith({ maxInstances: 10 }) instead.
-// In the v1 API, each function can only serve one request per container, so
-// this will be the maximum concurrent request count.
 setGlobalOptions({maxInstances: 10});
 
-// export const helloWorld = onRequest((request, response) => {
-//   logger.info("Hello logs!", {structuredData: true});
-//   response.send("Hello from Firebase!");
-// });
+const rtdb = admin.database();
+
+export const aiCommand = onCall(
+  {timeoutSeconds: 120, memory: "512MiB"},
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Must be logged in");
+    }
+
+    const {command, boardId} = request.data as {
+      command?: string;
+      boardId?: string;
+    };
+
+    if (!command || !boardId) {
+      throw new HttpsError(
+        "invalid-argument",
+        "command and boardId are required"
+      );
+    }
+
+    // AI lock — prevent concurrent agent runs on the same board
+    const lockRef = rtdb.ref(`boards/${boardId}/aiLock`);
+    const lockSnap = await lockRef.get();
+
+    if (lockSnap.exists()) {
+      const lock = lockSnap.val() as {startedAt: number};
+      if (Date.now() - lock.startedAt < 30000) {
+        throw new HttpsError(
+          "resource-exhausted",
+          "AI is already processing a command for this board"
+        );
+      }
+    }
+
+    await lockRef.set({
+      userId: request.auth.uid,
+      command,
+      startedAt: Date.now(),
+    });
+
+    try {
+      const result = await runAgent({
+        command,
+        boardId,
+        userId: request.auth.uid,
+      });
+      return result;
+    } finally {
+      await lockRef.remove();
+    }
+  }
+);
