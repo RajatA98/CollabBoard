@@ -37,7 +37,6 @@ vi.mock('react-konva', () => ({
 
 vi.mock('../GridBackground', () => ({ GridBackground: () => <div data-testid="grid" /> }));
 vi.mock('../RemoteCursor', () => ({ RemoteCursor: () => null }));
-vi.mock('../DimensionLabel', () => ({ DimensionLabel: () => null }));
 vi.mock('../SelectionRect', () => ({ SelectionRect: () => <div data-testid="selection-rect" /> }));
 
 vi.mock('konva', () => ({

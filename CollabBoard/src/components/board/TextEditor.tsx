@@ -8,12 +8,17 @@ interface TextEditorProps {
   text: string;
   color?: string;
   objectType?: 'sticky' | 'text';
+  fontSize?: number;
+  fontFamily?: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
   onSubmit: (text: string) => void;
   onCancel: () => void;
   onTextChange?: (text: string) => void;
 }
 
-export function TextEditor({ x, y, width, height, text, color = '#FFD54F', objectType = 'sticky', onSubmit, onCancel, onTextChange }: TextEditorProps) {
+export function TextEditor({ x, y, width, height, text, color = '#FFD54F', objectType = 'sticky', fontSize, fontFamily, bold, italic, underline, onSubmit, onCancel, onTextChange }: TextEditorProps) {
   const [value, setValue] = useState(text);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [textareaHeight, setTextareaHeight] = useState(height);
@@ -64,10 +69,13 @@ export function TextEditor({ x, y, width, height, text, color = '#FFD54F', objec
         width,
         height: textareaHeight,
         padding: '8px',
-        fontSize: '16px',
-        fontFamily: isTextType
+        fontSize: `${fontSize || 16}px`,
+        fontFamily: fontFamily || (isTextType
           ? "'Segoe UI', system-ui, sans-serif"
-          : "'Segoe Print', 'Comic Sans MS', cursive",
+          : "'Segoe Print', 'Comic Sans MS', cursive"),
+        fontWeight: bold ? 'bold' : 'normal',
+        fontStyle: italic ? 'italic' : 'normal',
+        textDecoration: underline ? 'underline' : 'none',
         border: isTextType
           ? '2px dashed #4285f4'
           : '3px solid #FFA726',
