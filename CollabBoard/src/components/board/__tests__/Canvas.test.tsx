@@ -38,6 +38,7 @@ vi.mock('react-konva', () => ({
 vi.mock('../GridBackground', () => ({ GridBackground: () => <div data-testid="grid" /> }));
 vi.mock('../RemoteCursor', () => ({ RemoteCursor: () => null }));
 vi.mock('../DimensionLabel', () => ({ DimensionLabel: () => null }));
+vi.mock('../SelectionRect', () => ({ SelectionRect: () => null }));
 
 vi.mock('konva', () => ({
   default: {},
@@ -47,6 +48,18 @@ describe('Canvas', () => {
   const mockViewport = { x: 0, y: 0, scaleX: 1, scaleY: 1 };
   const mockSetPosition = vi.fn();
   const mockZoomAtPoint = vi.fn();
+  const defaultCanvasProps = {
+    onObjectUpdate: vi.fn(),
+    onObjectDelete: vi.fn(),
+    onCanvasClick: vi.fn(),
+    onObjectDoubleClick: vi.fn(),
+    viewport: mockViewport,
+    setPosition: mockSetPosition,
+    zoomAtPoint: mockZoomAtPoint,
+    selectedObjectIds: [] as string[],
+    onSelectObject: vi.fn() as (id: string, additive: boolean) => void,
+    onClearSelection: vi.fn(),
+  };
 
   const stickyObject: BoardObject = {
     id: 'sticky-1',
@@ -105,13 +118,15 @@ describe('Canvas', () => {
     render(
       <Canvas
         objects={[]}
-        onObjectUpdate={vi.fn()}
-        onObjectDelete={vi.fn()}
-        onCanvasClick={vi.fn()}
-        onObjectDoubleClick={vi.fn()}
         viewport={mockViewport}
         setPosition={mockSetPosition}
         zoomAtPoint={mockZoomAtPoint}
+        onObjectUpdate={vi.fn()}
+        onObjectDelete={vi.fn()}
+        onCanvasClick={vi.fn()}
+        selectedObjectIds={[]}
+        onSelectObject={vi.fn()}
+        onClearSelection={vi.fn()}
       />
     );
     expect(screen.getByTestId('konva-stage')).toBeInTheDocument();
@@ -121,13 +136,15 @@ describe('Canvas', () => {
     render(
       <Canvas
         objects={[]}
-        onObjectUpdate={vi.fn()}
-        onObjectDelete={vi.fn()}
-        onCanvasClick={vi.fn()}
-        onObjectDoubleClick={vi.fn()}
         viewport={mockViewport}
         setPosition={mockSetPosition}
         zoomAtPoint={mockZoomAtPoint}
+        onObjectUpdate={vi.fn()}
+        onObjectDelete={vi.fn()}
+        onCanvasClick={vi.fn()}
+        selectedObjectIds={[]}
+        onSelectObject={vi.fn()}
+        onClearSelection={vi.fn()}
       />
     );
     const layers = screen.getAllByTestId('konva-layer');
@@ -147,15 +164,8 @@ describe('Canvas', () => {
     render(
       <Canvas
         objects={[stickyObject]}
-        onObjectUpdate={vi.fn()}
-        onObjectDelete={vi.fn()}
-        onCanvasClick={vi.fn()}
-        onObjectDoubleClick={vi.fn()}
-        viewport={mockViewport}
-        setPosition={mockSetPosition}
-        zoomAtPoint={mockZoomAtPoint}
-        selectedObjectId="sticky-1"
-        onSelectObject={vi.fn()}
+        {...defaultCanvasProps}
+        selectedObjectIds={['sticky-1']}
         remoteEditings={remoteEditings}
       />
     );
@@ -183,15 +193,8 @@ describe('Canvas', () => {
     render(
       <Canvas
         objects={[stickyObject]}
-        onObjectUpdate={vi.fn()}
-        onObjectDelete={vi.fn()}
-        onCanvasClick={vi.fn()}
-        onObjectDoubleClick={vi.fn()}
-        viewport={mockViewport}
-        setPosition={mockSetPosition}
-        zoomAtPoint={mockZoomAtPoint}
-        selectedObjectId="sticky-1"
-        onSelectObject={vi.fn()}
+        {...defaultCanvasProps}
+        selectedObjectIds={['sticky-1']}
         remoteTransforms={remoteTransforms}
       />
     );
@@ -220,15 +223,8 @@ describe('Canvas', () => {
     render(
       <Canvas
         objects={[stickyObject]}
-        onObjectUpdate={vi.fn()}
-        onObjectDelete={vi.fn()}
-        onCanvasClick={vi.fn()}
-        onObjectDoubleClick={vi.fn()}
-        viewport={mockViewport}
-        setPosition={mockSetPosition}
-        zoomAtPoint={mockZoomAtPoint}
-        selectedObjectId="sticky-1"
-        onSelectObject={vi.fn()}
+        {...defaultCanvasProps}
+        selectedObjectIds={['sticky-1']}
         remoteTransforms={remoteTransforms}
       />
     );
@@ -259,15 +255,8 @@ describe('Canvas', () => {
     render(
       <Canvas
         objects={[rectObject]}
-        onObjectUpdate={vi.fn()}
-        onObjectDelete={vi.fn()}
-        onCanvasClick={vi.fn()}
-        onObjectDoubleClick={vi.fn()}
-        viewport={mockViewport}
-        setPosition={mockSetPosition}
-        zoomAtPoint={mockZoomAtPoint}
-        selectedObjectId="rect-1"
-        onSelectObject={vi.fn()}
+        {...defaultCanvasProps}
+        selectedObjectIds={['rect-1']}
         remoteTransforms={remoteTransforms}
       />
     );
@@ -285,10 +274,10 @@ describe('Canvas', () => {
         onObjectUpdate={vi.fn()}
         onObjectDelete={vi.fn()}
         onCanvasClick={vi.fn()}
-        onObjectDoubleClick={vi.fn()}
         viewport={mockViewport}
         setPosition={mockSetPosition}
         zoomAtPoint={mockZoomAtPoint}
+        {...defaultCanvasProps}
       />
     );
     expect(screen.getByTestId('text-element')).toBeInTheDocument();

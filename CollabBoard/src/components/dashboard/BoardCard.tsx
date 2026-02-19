@@ -4,9 +4,10 @@ interface BoardCardProps {
   board: BoardMeta;
   actionLabel: string;
   onAction: () => void;
+  onDelete?: () => void;
 }
 
-export function BoardCard({ board, actionLabel, onAction }: BoardCardProps) {
+export function BoardCard({ board, actionLabel, onAction, onDelete }: BoardCardProps) {
   const memberCount = board.members.length;
   const createdDate = new Date(board.createdAt).toLocaleDateString();
 
@@ -22,9 +23,22 @@ export function BoardCard({ board, actionLabel, onAction }: BoardCardProps) {
           {memberCount} member{memberCount !== 1 ? 's' : ''}
         </span>
       </div>
-      <button className="board-card-action" onClick={onAction}>
-        {actionLabel}
-      </button>
+      <div className="board-card-actions">
+        <button className="board-card-action" onClick={onAction}>
+          {actionLabel}
+        </button>
+        {onDelete && (
+          <button
+            type="button"
+            className="board-card-delete"
+            onClick={onDelete}
+            aria-label="Delete board"
+            data-testid="delete-board-btn"
+          >
+            Delete
+          </button>
+        )}
+      </div>
     </div>
   );
 }

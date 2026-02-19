@@ -3,9 +3,18 @@ import { useEffect, useRef } from 'react';
 export interface ContextMenuProps {
   x: number;
   y: number;
-  objectType: 'sticky' | 'rectangle' | 'text';
+  objectType?: 'sticky' | 'rectangle' | 'text';
   onEditText?: () => void;
+  onCopy?: () => void;
+  onCut?: () => void;
+  onPaste?: () => void;
   onDuplicate: () => void;
+  onSelectAll?: () => void;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
+  hasClipboardContent?: boolean;
   onDelete: () => void;
   onClose: () => void;
 }
@@ -15,7 +24,16 @@ export function ContextMenu({
   y,
   objectType,
   onEditText,
+  onCopy,
+  onCut,
+  onPaste,
   onDuplicate,
+  onSelectAll,
+  onUndo,
+  onRedo,
+  canUndo = false,
+  canRedo = false,
+  hasClipboardContent = false,
   onDelete,
   onClose,
 }: ContextMenuProps) {
@@ -48,7 +66,7 @@ export function ContextMenu({
       className="context-menu"
       data-testid="context-menu"
       style={{
-        position: 'absolute',
+        position: 'fixed',
         left: x,
         top: y,
         zIndex: 1000,
@@ -69,6 +87,37 @@ export function ContextMenu({
           Edit Text
         </button>
       )}
+      {onCopy && (
+        <button
+          type="button"
+          className="context-menu-item"
+          onClick={() => onCopy()}
+          data-testid="context-menu-copy"
+        >
+          Copy <span className="context-menu-shortcut">⌘C</span>
+        </button>
+      )}
+      {onCut && (
+        <button
+          type="button"
+          className="context-menu-item"
+          onClick={() => onCut()}
+          data-testid="context-menu-cut"
+        >
+          Cut <span className="context-menu-shortcut">⌘X</span>
+        </button>
+      )}
+      {onPaste && (
+        <button
+          type="button"
+          className="context-menu-item"
+          onClick={() => onPaste()}
+          disabled={!hasClipboardContent}
+          data-testid="context-menu-paste"
+        >
+          Paste <span className="context-menu-shortcut">⌘V</span>
+        </button>
+      )}
       <button
         type="button"
         className="context-menu-item"
@@ -77,6 +126,39 @@ export function ContextMenu({
       >
         Duplicate <span className="context-menu-shortcut">⌘D</span>
       </button>
+      {onSelectAll && (
+        <button
+          type="button"
+          className="context-menu-item"
+          onClick={() => onSelectAll()}
+          data-testid="context-menu-select-all"
+        >
+          Select All <span className="context-menu-shortcut">⌘A</span>
+        </button>
+      )}
+      <div className="context-menu-divider" />
+      {onUndo && (
+        <button
+          type="button"
+          className="context-menu-item"
+          onClick={() => onUndo()}
+          disabled={!canUndo}
+          data-testid="context-menu-undo"
+        >
+          Undo <span className="context-menu-shortcut">⌘Z</span>
+        </button>
+      )}
+      {onRedo && (
+        <button
+          type="button"
+          className="context-menu-item"
+          onClick={() => onRedo()}
+          disabled={!canRedo}
+          data-testid="context-menu-redo"
+        >
+          Redo <span className="context-menu-shortcut">⌘⇧Z</span>
+        </button>
+      )}
       <div className="context-menu-divider" />
       <button
         type="button"
@@ -84,7 +166,7 @@ export function ContextMenu({
         onClick={() => onDelete()}
         data-testid="context-menu-delete"
       >
-        Delete
+        Delete <span className="context-menu-shortcut">⌫</span>
       </button>
     </div>
   );

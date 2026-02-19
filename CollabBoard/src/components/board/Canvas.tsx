@@ -7,20 +7,29 @@ import { Rectangle } from './Rectangle';
 import { TextElement } from './TextElement';
 import { RemoteCursor } from './RemoteCursor';
 import { DimensionLabel } from './DimensionLabel';
+import { SelectionRect } from './SelectionRect';
+import { rectsIntersect } from '../../utils/coordinates';
 import type { BoardObject, CursorData, LiveTransformData, LiveEditingData } from '../../types';
 
 interface CanvasProps {
   objects: BoardObject[];
   onObjectUpdate: (id: string, updates: Partial<BoardObject>) => void;
+  onBatchObjectUpdate?: (changes: { id: string; updates: Partial<BoardObject> }[]) => void;
   onObjectDelete: (id: string) => void;
   onCanvasClick: () => void;
+  onCanvasRightClick?: (screenPos: { x: number; y: number }) => void;
+  onLastClickPosition?: (worldPos: { x: number; y: number }) => void;
   onObjectDoubleClick?: (obj: BoardObject) => void;
   onObjectRightClick?: (obj: BoardObject, screenPos: { x: number; y: number }) => void;
-  onDuplicateObject?: (id: string) => void;
   remoteCursors?: Record<string, CursorData>;
   onMouseMove?: (x: number, y: number) => void;
-  selectedObjectId?: string | null;
-  onSelectObject?: (id: string | null) => void;
+  selectedObjectIds: string[];
+  onSelectObject: (id: string, additive: boolean) => void;
+  onClearSelection: () => void;
+  onSelectAll?: () => void;
+  onDeleteSelected?: () => void;
+  onDuplicateSelected?: () => void;
+  onSetSelectedIds?: (ids: string[]) => void;
   viewport: { x: number; y: number; scaleX: number; scaleY: number };
   setPosition: (x: number, y: number) => void;
   zoomAtPoint: (newScale: number, pointerX: number, pointerY: number) => void;
@@ -36,6 +45,8 @@ interface CanvasProps {
   remoteEditings?: Record<string, LiveEditingData>;
   onBroadcastTransform?: (objectId: string, x: number, y: number, width: number, height: number, rotation: number) => void;
   onClearTransform?: () => void;
+  /** When true, stage panning is disabled so HTML5 drop from sidebar is not stolen. */
+  isDraggingShapeFromSidebar?: boolean;
 }
 
 const ZOOM_SPEED = 1.05;
@@ -45,15 +56,22 @@ const MIN_OBJECT_SIZE = 60;
 export function Canvas({
   objects,
   onObjectUpdate,
-  onObjectDelete,
+  onBatchObjectUpdate,
+  onObjectDelete: _onObjectDelete,
   onCanvasClick,
+  onCanvasRightClick,
+  onLastClickPosition,
   onObjectDoubleClick,
   onObjectRightClick,
-  onDuplicateObject,
   remoteCursors = {},
   onMouseMove,
-  selectedObjectId,
+  selectedObjectIds,
   onSelectObject,
+  onClearSelection,
+  onSelectAll: _onSelectAll,
+  onDeleteSelected,
+  onDuplicateSelected,
+  onSetSelectedIds,
   viewport,
   setPosition,
   zoomAtPoint,
@@ -63,6 +81,7 @@ export function Canvas({
   remoteEditings = {},
   onBroadcastTransform,
   onClearTransform,
+  isDraggingShapeFromSidebar = false,
 }: CanvasProps) {
   const stageRef = useRef<Konva.Stage>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
@@ -70,7 +89,6 @@ export function Canvas({
   const [isAltDown, setIsAltDown] = useState(false);
   const [transformMode, setTransformMode] = useState<'idle' | 'resize' | 'rotate'>('idle');
   const lastRotationRef = useRef<number>(0);
-  /** Once user has rotated this gesture, keep showing rotation until transform ends */
   const isRotatingGestureRef = useRef(false);
   const [liveTransform, setLiveTransform] = useState<{
     width: number;
@@ -81,8 +99,16 @@ export function Canvas({
   } | null>(null);
   const liveTransformRef = useRef<typeof liveTransform>(null);
   const isTransformingRef = useRef(false);
+  const transformFlushScheduledRef = useRef(false);
+  const transformingObjectIdRef = useRef<string | null>(null);
   const [dimensionLabelTick, setDimensionLabelTick] = useState(0);
   const dimensionLabelRafRef = useRef<number | null>(null);
+  const dragStartPositionsRef = useRef<Map<string, { x: number; y: number }> | null>(null);
+  const [isMiddleMouseDown, setIsMiddleMouseDown] = useState(false);
+  const middleMousePanStartRef = useRef<{ pointerX: number; pointerY: number; viewportX: number; viewportY: number } | null>(null);
+  const [isMarqueeSelecting, setIsMarqueeSelecting] = useState(false);
+  const [marqueeStart, setMarqueeStart] = useState<{ x: number; y: number } | null>(null);
+  const [marqueeEnd, setMarqueeEnd] = useState<{ x: number; y: number } | null>(null);
 
   // One rAF-driven re-render per frame during transform so DimensionLabel reads liveTransformRef without delay
   const startDimensionLabelRafLoop = useCallback(() => {
@@ -121,11 +147,194 @@ export function Canvas({
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  const getWorldPointer = useCallback(() => {
+    const stage = stageRef.current;
+    if (!stage) return null;
+    const pointer = stage.getPointerPosition();
+    if (!pointer) return null;
+    return {
+      x: (pointer.x - viewport.x) / viewport.scaleX,
+      y: (pointer.y - viewport.y) / viewport.scaleY,
+    };
+  }, [viewport]);
+
+  useEffect(() => {
+    if (!isMiddleMouseDown) return;
+    const prevCursor = document.body.style.cursor;
+    document.body.style.cursor = 'grabbing';
+    const onWindowMouseMove = (e: MouseEvent) => {
+      const start = middleMousePanStartRef.current;
+      if (!start) return;
+      const dx = e.clientX - start.pointerX;
+      const dy = e.clientY - start.pointerY;
+      setPosition(start.viewportX + dx, start.viewportY + dy);
+    };
+    const onWindowMouseUp = (e: MouseEvent) => {
+      if (e.button === 1) {
+        middleMousePanStartRef.current = null;
+        setIsMiddleMouseDown(false);
+      }
+    };
+    window.addEventListener('mousemove', onWindowMouseMove);
+    window.addEventListener('mouseup', onWindowMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onWindowMouseMove);
+      window.removeEventListener('mouseup', onWindowMouseUp);
+      document.body.style.cursor = prevCursor;
+    };
+  }, [isMiddleMouseDown, setPosition]);
+
+  const handleStageMouseDown = useCallback(
+    (e: Konva.KonvaEventObject<MouseEvent>) => {
+      if (e.evt.button === 1) {
+        e.evt.preventDefault();
+        setIsMiddleMouseDown(true);
+        middleMousePanStartRef.current = {
+          pointerX: e.evt.clientX,
+          pointerY: e.evt.clientY,
+          viewportX: viewport.x,
+          viewportY: viewport.y,
+        };
+        return;
+      }
+      if (e.target !== stageRef.current) return;
+      if (e.evt.button !== 0) return;
+      const worldPos = getWorldPointer();
+      if (!worldPos) return;
+      setIsMarqueeSelecting(true);
+      setMarqueeStart(worldPos);
+      setMarqueeEnd(worldPos);
+    },
+    [getWorldPointer, viewport]
+  );
+
+  const handleStageMouseMove = useCallback(
+    (_e: Konva.KonvaEventObject<MouseEvent>) => {
+      if (onMouseMove) {
+        const worldPos = getWorldPointer();
+        if (worldPos) onMouseMove(worldPos.x, worldPos.y);
+      }
+      if (isMarqueeSelecting) {
+        const worldPos = getWorldPointer();
+        if (worldPos) setMarqueeEnd(worldPos);
+      }
+    },
+    [onMouseMove, getWorldPointer, isMarqueeSelecting]
+  );
+
+  const handleStageMouseUp = useCallback(
+    (e: Konva.KonvaEventObject<MouseEvent>) => {
+      if (e.evt.button === 1) {
+        setIsMiddleMouseDown(false);
+        return;
+      }
+      if (!isMarqueeSelecting || !marqueeStart || !marqueeEnd) return;
+      const minX = Math.min(marqueeStart.x, marqueeEnd.x);
+      const minY = Math.min(marqueeStart.y, marqueeEnd.y);
+      const width = Math.abs(marqueeEnd.x - marqueeStart.x);
+      const height = Math.abs(marqueeEnd.y - marqueeStart.y);
+      if (width > 5 || height > 5) {
+        const marqueeRect = { x: minX, y: minY, width, height };
+        const hitIds = objects
+          .filter((obj) =>
+            rectsIntersect(marqueeRect, { x: obj.x, y: obj.y, width: obj.width, height: obj.height })
+          )
+          .map((obj) => obj.id);
+        if (hitIds.length > 0) {
+          onSetSelectedIds?.(hitIds);
+        } else {
+          onClearSelection();
+        }
+      } else {
+        onClearSelection();
+        onCanvasClick();
+      }
+      setIsMarqueeSelecting(false);
+      setMarqueeStart(null);
+      setMarqueeEnd(null);
+    },
+    [isMarqueeSelecting, marqueeStart, marqueeEnd, objects, onSetSelectedIds, onClearSelection, onCanvasClick]
+  );
+
+  const handleObjectDragStart = useCallback(
+    (draggedId: string) => {
+      if (selectedObjectIds.includes(draggedId) && selectedObjectIds.length > 1) {
+        const stage = stageRef.current;
+        if (!stage) return;
+        const positions = new Map<string, { x: number; y: number }>();
+        selectedObjectIds.forEach((id) => {
+          const node = stage.findOne('#' + id);
+          if (node) positions.set(id, { x: node.x(), y: node.y() });
+        });
+        dragStartPositionsRef.current = positions;
+      } else {
+        dragStartPositionsRef.current = null;
+      }
+    },
+    [selectedObjectIds]
+  );
+
+  const handleObjectDragMove = useCallback(
+    (draggedId: string, newX: number, newY: number) => {
+      const positions = dragStartPositionsRef.current;
+      if (!positions || selectedObjectIds.length <= 1) return;
+      const startPos = positions.get(draggedId);
+      if (!startPos) return;
+      const dx = newX - startPos.x;
+      const dy = newY - startPos.y;
+      const stage = stageRef.current;
+      if (!stage) return;
+      selectedObjectIds.forEach((id) => {
+        if (id === draggedId) return;
+        const pos = positions.get(id);
+        if (!pos) return;
+        const node = stage.findOne('#' + id);
+        if (node) {
+          node.x(pos.x + dx);
+          node.y(pos.y + dy);
+        }
+      });
+      stage.findOne('.konva-transformer')?.getLayer()?.batchDraw();
+    },
+    [selectedObjectIds]
+  );
+
+  const handleObjectDragEnd = useCallback(
+    (draggedId: string, finalX: number, finalY: number) => {
+      const positions = dragStartPositionsRef.current;
+      if (!positions || selectedObjectIds.length <= 1) {
+        onObjectUpdate(draggedId, { x: finalX, y: finalY });
+        return;
+      }
+      const startPos = positions.get(draggedId);
+      if (!startPos) return;
+      const dx = finalX - startPos.x;
+      const dy = finalY - startPos.y;
+      if (onBatchObjectUpdate) {
+        const changes = selectedObjectIds
+          .map((id) => {
+            const pos = positions.get(id);
+            return pos ? { id, updates: { x: pos.x + dx, y: pos.y + dy } as Partial<BoardObject> } : null;
+          })
+          .filter((c): c is { id: string; updates: Partial<BoardObject> } => c !== null);
+        if (changes.length > 0) onBatchObjectUpdate(changes);
+      } else {
+        selectedObjectIds.forEach((id) => {
+          const pos = positions.get(id);
+          if (pos) onObjectUpdate(id, { x: pos.x + dx, y: pos.y + dy });
+        });
+      }
+      dragStartPositionsRef.current = null;
+    },
+    [selectedObjectIds, onObjectUpdate, onBatchObjectUpdate]
+  );
+
   const handleWheel = useCallback(
     (e: Konva.KonvaEventObject<WheelEvent>) => {
       e.evt.preventDefault();
+      if (isDraggingShapeFromSidebar) return;
       const stage = stageRef.current;
-      if (!stage) return;
+      if (!stage || viewport == null) return;
 
       const oldScale = viewport.scaleX;
       const pointer = stage.getPointerPosition();
@@ -135,40 +344,35 @@ export function Canvas({
       const newScale = direction > 0 ? oldScale * ZOOM_SPEED : oldScale / ZOOM_SPEED;
       zoomAtPoint(newScale, pointer.x, pointer.y);
     },
-    [viewport.scaleX, zoomAtPoint]
-  );
-
-  const handleDragEnd = useCallback(
-    (e: Konva.KonvaEventObject<DragEvent>) => {
-      if (e.target === stageRef.current) {
-        setPosition(e.target.x(), e.target.y());
-      }
-    },
-    [setPosition]
+    [viewport, zoomAtPoint, isDraggingShapeFromSidebar]
   );
 
   const handleStageClick = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
-      if (e.target === stageRef.current) {
-        onSelectObject?.(null);
-        onCanvasClick();
+      const stage = e.target.getStage();
+      const pos = stage?.getPointerPosition();
+      if (pos && onLastClickPosition) {
+        const worldX = (pos.x - viewport.x) / viewport.scaleX;
+        const worldY = (pos.y - viewport.y) / viewport.scaleY;
+        onLastClickPosition({ x: worldX, y: worldY });
       }
     },
-    [onCanvasClick, onSelectObject]
+    [viewport, onLastClickPosition]
   );
 
-  const handleMouseMove = useCallback(
-    () => {
-      if (!onMouseMove) return;
-      const stage = stageRef.current;
-      if (!stage) return;
-      const pointer = stage.getPointerPosition();
-      if (!pointer) return;
-      const worldX = (pointer.x - viewport.x) / viewport.scaleX;
-      const worldY = (pointer.y - viewport.y) / viewport.scaleY;
-      onMouseMove(worldX, worldY);
+  const handleStageContextMenu = useCallback(
+    (e: Konva.KonvaEventObject<PointerEvent>) => {
+      const stage = e.target.getStage();
+      const target = e.target;
+      const isStage = target === stage;
+      const isLayer = (target as Konva.Node).getClassName?.() === 'Layer';
+      if (isStage || isLayer) {
+        e.evt.preventDefault();
+        const pointer = stage?.getPointerPosition();
+        if (pointer) onCanvasRightClick?.({ x: pointer.x, y: pointer.y });
+      }
     },
-    [onMouseMove, viewport]
+    [onCanvasRightClick]
   );
 
   const handleKeyDown = useCallback(
@@ -184,16 +388,16 @@ export function Canvas({
           (active as HTMLElement).isContentEditable);
       if (isEditingInput) return;
 
-      if ((e.key === 'Backspace' || e.key === 'Delete') && selectedObjectId) {
-        onObjectDelete(selectedObjectId);
-        onSelectObject?.(null);
-      }
-      if (e.key === 'd' && (e.metaKey || e.ctrlKey) && selectedObjectId) {
+      if ((e.key === 'Backspace' || e.key === 'Delete') && selectedObjectIds.length > 0) {
         e.preventDefault();
-        onDuplicateObject?.(selectedObjectId);
+        onDeleteSelected?.();
+      }
+      if (e.key === 'd' && (e.metaKey || e.ctrlKey) && selectedObjectIds.length > 0) {
+        e.preventDefault();
+        onDuplicateSelected?.();
       }
     },
-    [selectedObjectId, isEditingText, onObjectDelete, onSelectObject, onDuplicateObject]
+    [selectedObjectIds.length, isEditingText, onDeleteSelected, onDuplicateSelected]
   );
 
   useEffect(() => {
@@ -217,32 +421,28 @@ export function Canvas({
     };
   }, []);
 
-  // Attach transformer to selected node
+  // Attach transformer only for single selection
   useEffect(() => {
     const stage = stageRef.current;
     const transformer = transformerRef.current;
     if (!stage || !transformer) return;
-
-    if (selectedObjectId) {
-      const node = stage.findOne('#' + selectedObjectId);
-      if (node) {
-        transformer.nodes([node]);
-      } else {
-        transformer.nodes([]);
-      }
+    if (selectedObjectIds.length === 1) {
+      const node = stage.findOne('#' + selectedObjectIds[0]);
+      transformer.nodes(node ? [node] : []);
     } else {
       transformer.nodes([]);
     }
     transformer.getLayer()?.batchDraw();
-  }, [selectedObjectId]);
+  }, [selectedObjectIds]);
 
   // Helper to create onDragMove handler for broadcasting
   const makeDragMoveHandler = useCallback(
     (obj: BoardObject) => (e: Konva.KonvaEventObject<DragEvent>) => {
       const node = e.target;
+      handleObjectDragMove(obj.id, node.x(), node.y());
       onBroadcastTransform?.(obj.id, node.x(), node.y(), obj.width, obj.height, obj.rotation || 0);
     },
-    [onBroadcastTransform]
+    [onBroadcastTransform, handleObjectDragMove]
   );
 
   const handleDragEndExtra = useCallback(() => {
@@ -250,27 +450,38 @@ export function Canvas({
   }, [onClearTransform]);
 
   return (
+    <div style={{ width: '100%', height: '100%', pointerEvents: isDraggingShapeFromSidebar ? 'none' : 'auto' }}>
     <Stage
       ref={stageRef}
       width={stageSize.width}
       height={stageSize.height}
-      draggable
       x={viewport.x}
       y={viewport.y}
       scaleX={viewport.scaleX}
       scaleY={viewport.scaleY}
       onWheel={handleWheel}
-      onDragEnd={handleDragEnd}
       onClick={handleStageClick}
-      onMouseMove={handleMouseMove}
+      onContextMenu={handleStageContextMenu}
+      onMouseDown={handleStageMouseDown}
+      onMouseMove={handleStageMouseMove}
+      onMouseUp={handleStageMouseUp}
     >
       <Layer>
         <GridBackground viewport={viewport} stageSize={stageSize} />
       </Layer>
       <Layer>
-        {/* Render non-selected objects first so selected object + handles draw on top */}
+        {isMarqueeSelecting && marqueeStart && marqueeEnd && (
+          <SelectionRect
+            x={Math.min(marqueeStart.x, marqueeEnd.x)}
+            y={Math.min(marqueeStart.y, marqueeEnd.y)}
+            width={Math.abs(marqueeEnd.x - marqueeStart.x)}
+            height={Math.abs(marqueeEnd.y - marqueeStart.y)}
+            visible
+          />
+        )}
+        {/* Render non-selected objects first so selected objects + Transformer draw on top */}
         {objects
-          .filter((obj) => selectedObjectId !== obj.id)
+          .filter((obj) => !selectedObjectIds.includes(obj.id))
           .map((obj) => {
             // Apply remote live transform if another user is manipulating this object
             const remoteXform = remoteTransformByObjectId[obj.id];
@@ -285,7 +496,8 @@ export function Canvas({
                   key={obj.id}
                   object={displayObj}
                   isSelected={false}
-                  onSelect={() => onSelectObject?.(obj.id)}
+                  onSelect={(additive) => onSelectObject(obj.id, additive)}
+                  onDragStart={() => handleObjectDragStart(obj.id)}
                   onUpdate={(updates) => onObjectUpdate(obj.id, updates)}
                   onDoubleClick={() => onObjectDoubleClick?.(obj)}
                   onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
@@ -301,7 +513,8 @@ export function Canvas({
                   key={obj.id}
                   object={displayObj}
                   isSelected={false}
-                  onSelect={() => onSelectObject?.(obj.id)}
+                  onSelect={(additive) => onSelectObject(obj.id, additive)}
+                  onDragStart={() => handleObjectDragStart(obj.id)}
                   onUpdate={(updates) => onObjectUpdate(obj.id, updates)}
                   onDoubleClick={() => onObjectDoubleClick?.(obj)}
                   onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
@@ -317,7 +530,8 @@ export function Canvas({
                   key={obj.id}
                   object={displayObj}
                   isSelected={false}
-                  onSelect={() => onSelectObject?.(obj.id)}
+                  onSelect={(additive) => onSelectObject(obj.id, additive)}
+                  onDragStart={() => handleObjectDragStart(obj.id)}
                   onUpdate={(updates) => onObjectUpdate(obj.id, updates)}
                   onDoubleClick={() => onObjectDoubleClick?.(obj)}
                   onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
@@ -328,10 +542,10 @@ export function Canvas({
               );
             }
           })}
-        {/* Render selected object and its TransformHandles last so they are on top */}
-        {selectedObjectId &&
+        {/* Render selected objects; Transformer only when exactly one selected */}
+        {selectedObjectIds.length > 0 &&
           objects
-            .filter((obj) => obj.id === selectedObjectId)
+            .filter((obj) => selectedObjectIds.includes(obj.id))
             .map((obj) => {
               const remoteXform = remoteTransformByObjectId[obj.id];
               const remoteEdit = remoteEditingByObjectId[obj.id];
@@ -348,8 +562,15 @@ export function Canvas({
                   <StickyNote
                     object={displayObject}
                     isSelected
-                    onSelect={() => onSelectObject?.(obj.id)}
-                    onUpdate={(updates) => onObjectUpdate(obj.id, updates)}
+                    onSelect={(additive) => onSelectObject(obj.id, additive)}
+                    onDragStart={() => handleObjectDragStart(obj.id)}
+                    onUpdate={(updates) => {
+                      if (updates.x !== undefined && updates.y !== undefined && selectedObjectIds.length > 1) {
+                        handleObjectDragEnd(obj.id, updates.x, updates.y);
+                      } else {
+                        onObjectUpdate(obj.id, updates);
+                      }
+                    }}
                     onDoubleClick={() => onObjectDoubleClick?.(obj)}
                     onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
                     onDragMove={makeDragMoveHandler(obj)}
@@ -361,8 +582,15 @@ export function Canvas({
                   <TextElement
                     object={displayObject}
                     isSelected
-                    onSelect={() => onSelectObject?.(obj.id)}
-                    onUpdate={(updates) => onObjectUpdate(obj.id, updates)}
+                    onSelect={(additive) => onSelectObject(obj.id, additive)}
+                    onDragStart={() => handleObjectDragStart(obj.id)}
+                    onUpdate={(updates) => {
+                      if (updates.x !== undefined && updates.y !== undefined && selectedObjectIds.length > 1) {
+                        handleObjectDragEnd(obj.id, updates.x, updates.y);
+                      } else {
+                        onObjectUpdate(obj.id, updates);
+                      }
+                    }}
                     onDoubleClick={() => onObjectDoubleClick?.(obj)}
                     onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
                     onDragMove={makeDragMoveHandler(obj)}
@@ -374,8 +602,15 @@ export function Canvas({
                   <Rectangle
                     object={displayObject}
                     isSelected
-                    onSelect={() => onSelectObject?.(obj.id)}
-                    onUpdate={(updates) => onObjectUpdate(obj.id, updates)}
+                    onSelect={(additive) => onSelectObject(obj.id, additive)}
+                    onDragStart={() => handleObjectDragStart(obj.id)}
+                    onUpdate={(updates) => {
+                      if (updates.x !== undefined && updates.y !== undefined && selectedObjectIds.length > 1) {
+                        handleObjectDragEnd(obj.id, updates.x, updates.y);
+                      } else {
+                        onObjectUpdate(obj.id, updates);
+                      }
+                    }}
                     onDoubleClick={() => onObjectDoubleClick?.(obj)}
                     onRightClick={(screenX, screenY) => onObjectRightClick?.(obj, { x: screenX, y: screenY })}
                     onDragMove={makeDragMoveHandler(obj)}
@@ -383,6 +618,8 @@ export function Canvas({
                     remoteTransform={remoteXform}
                   />
                 )}
+                {selectedObjectIds.length === 1 && (
+                <>
                 <Transformer
                   ref={transformerRef}
                   keepRatio={!isAltDown}
@@ -423,6 +660,7 @@ export function Canvas({
                   }}
                   onTransformStart={() => {
                     isTransformingRef.current = true;
+                    transformingObjectIdRef.current = obj.id;
                     startDimensionLabelRafLoop();
                     const activeAnchor = transformerRef.current?.getActiveAnchor?.() ?? null;
                     if (activeAnchor === 'rotater') {
@@ -461,10 +699,22 @@ export function Canvas({
                     };
 
                     liveTransformRef.current = liveValues;
-                    setLiveTransform(liveValues);
-                    onLiveTransformChange?.(liveValues);
-                    // Broadcast to remote users
-                    onBroadcastTransform?.(obj.id, liveValues.x, liveValues.y, liveValues.width, liveValues.height, liveValues.rotation);
+                    // Flush to state/callbacks once per frame for smooth 60fps updates
+                    if (!transformFlushScheduledRef.current) {
+                      transformFlushScheduledRef.current = true;
+                      requestAnimationFrame(() => {
+                        transformFlushScheduledRef.current = false;
+                        const current = liveTransformRef.current;
+                        if (current) {
+                          setLiveTransform({ ...current });
+                          onLiveTransformChange?.(current);
+                          const id = transformingObjectIdRef.current;
+                          if (id) {
+                            onBroadcastTransform?.(id, current.x, current.y, current.width, current.height, current.rotation);
+                          }
+                        }
+                      });
+                    }
                   }}
                   onTransformEnd={(e) => {
                     const node = e.target;
@@ -492,6 +742,7 @@ export function Canvas({
 
                     // Clear live transform
                     isTransformingRef.current = false;
+                    transformingObjectIdRef.current = null;
                     liveTransformRef.current = null;
                     if (dimensionLabelRafRef.current != null) {
                       cancelAnimationFrame(dimensionLabelRafRef.current);
@@ -552,6 +803,8 @@ export function Canvas({
                   liveTransformRef={liveTransformRef}
                   dimensionLabelTick={dimensionLabelTick}
                 />
+                </>
+                )}
               </React.Fragment>
               );
             })}
@@ -562,5 +815,6 @@ export function Canvas({
         ))}
       </Layer>
     </Stage>
+    </div>
   );
 }

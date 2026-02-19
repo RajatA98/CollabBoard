@@ -1,6 +1,6 @@
 import { ref, set, onValue, onDisconnect, remove } from 'firebase/database';
 import { rtdb } from './config';
-import type { CursorData, PresenceData, LiveTransformData, LiveEditingData } from '../types';
+import type { CursorData, PresenceData, LiveTransformData, LiveEditingData, SelectionData } from '../types';
 
 export function getCursorRef(boardId: string, userId: string) {
   return ref(rtdb, `boards/${boardId}/cursors/${userId}`);
@@ -186,6 +186,52 @@ export function setupEditingDisconnect(boardId: string, userId: string) {
   onDisconnect(editingRef).remove();
 }
 
+// --- Selection operations ---
+
+export function getSelectionRef(boardId: string, userId: string) {
+  return ref(rtdb, `boards/${boardId}/selection/${userId}`);
+}
+
+export function getSelectionsRef(boardId: string) {
+  return ref(rtdb, `boards/${boardId}/selection`);
+}
+
+export async function setSelection(boardId: string, userId: string, data: SelectionData) {
+  const selectionRef = getSelectionRef(boardId, userId);
+  try {
+    await set(selectionRef, data);
+  } catch (error) {
+    console.error('Failed to set selection:', error);
+  }
+}
+
+export async function removeSelection(boardId: string, userId: string) {
+  const selectionRef = getSelectionRef(boardId, userId);
+  await remove(selectionRef);
+}
+
+export function onSelectionsChange(
+  boardId: string,
+  callback: (selections: Record<string, SelectionData>) => void
+): () => void {
+  const selectionsRef = getSelectionsRef(boardId);
+  const unsubscribe = onValue(
+    selectionsRef,
+    (snapshot) => {
+      callback(snapshot.val() ?? {});
+    },
+    (error) => {
+      console.error('Error listening to selections:', error);
+    }
+  );
+  return unsubscribe;
+}
+
+export function setupSelectionDisconnect(boardId: string, userId: string) {
+  const selectionRef = getSelectionRef(boardId, userId);
+  onDisconnect(selectionRef).remove();
+}
+
 // --- Cleanup ---
 
 export async function cleanupUserData(boardId: string, userId: string) {
@@ -195,6 +241,7 @@ export async function cleanupUserData(boardId: string, userId: string) {
     removeCursor(boardId, userId),
     removeTransform(boardId, userId),
     removeEditing(boardId, userId),
+    removeSelection(boardId, userId),
   ]);
   console.log('User data cleaned up successfully');
 }

@@ -51,6 +51,13 @@ export interface LiveEditingData {
   lastActive: number;
 }
 
+export interface SelectionData {
+  objectId: string | null;
+  userName?: string;
+  userColor?: string;
+  lastActive: number;
+}
+
 export interface AppUser {
   uid: string;
   email: string;

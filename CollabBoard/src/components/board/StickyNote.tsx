@@ -14,17 +14,18 @@ import {
 interface StickyNoteProps {
   object: BoardObject;
   isSelected: boolean;
-  onSelect: () => void;
+  onSelect: (additive: boolean) => void;
   onUpdate: (updates: Partial<BoardObject>) => void;
   onDoubleClick?: () => void;
   onRightClick?: (screenX: number, screenY: number) => void;
+  onDragStart?: () => void;
   onDragMove?: (e: KonvaEventObject<DragEvent>) => void;
   onDragEndExtra?: () => void;
   remoteEditing?: LiveEditingData;
   remoteTransform?: LiveTransformData;
 }
 
-export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleClick, onRightClick, onDragMove, onDragEndExtra, remoteEditing, remoteTransform }: StickyNoteProps) {
+export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleClick, onRightClick, onDragStart, onDragMove, onDragEndExtra, remoteEditing, remoteTransform }: StickyNoteProps) {
   const handleDoubleClick = () => {
     console.log('Sticky note double-clicked!', object.id);
     if (onDoubleClick) {
@@ -41,18 +42,16 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
       const pointer = stage?.getPointerPosition();
       if (pointer) onRightClick?.(pointer.x, pointer.y);
     } else {
-      onSelect();
+      onSelect(!!(e.evt?.ctrlKey || e.evt?.metaKey));
     }
   };
 
   const handleContextMenu = (e: KonvaEventObject<MouseEvent>) => {
     e.evt.preventDefault();
-    const stage = e.target.getStage();
-    const pointer = stage?.getPointerPosition();
-    if (pointer) onRightClick?.(pointer.x, pointer.y);
+    onRightClick?.(e.evt.clientX, e.evt.clientY);
   };
 
-  // Auto-expand height when text overflows
+  // Auto-expand height when text needs more space; never shrink below current size
   useEffect(() => {
     const displayText = remoteEditing ? remoteEditing.text : (object.text ?? '');
     if (!displayText) return;
@@ -64,11 +63,13 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
       fontFamily: STICKY_FONT_FAMILY,
     });
 
-    const requiredHeight = STICKY_TEXT_OFFSET_Y + neededTextHeight + STICKY_TEXT_PADDING_BOTTOM;
-    const finalHeight = Math.max(STICKY_MIN_HEIGHT, requiredHeight);
-
-    if (Math.abs(finalHeight - object.height) > 1) {
-      onUpdate({ height: finalHeight });
+    const requiredHeight = Math.max(
+      STICKY_MIN_HEIGHT,
+      STICKY_TEXT_OFFSET_Y + neededTextHeight + STICKY_TEXT_PADDING_BOTTOM
+    );
+    // Only expand when text needs more space; never shrink
+    if (requiredHeight > object.height && Math.abs(requiredHeight - object.height) > 1) {
+      onUpdate({ height: requiredHeight });
     }
   }, [object.text, object.width, object.height, remoteEditing, onUpdate]);
 
@@ -80,8 +81,9 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
       rotation={object.rotation || 0}
       draggable
       onClick={handleClick}
-      onTap={onSelect}
+      onTap={() => onSelect(false)}
       onDblClick={handleDoubleClick}
+      onDragStart={onDragStart}
       onDblTap={handleDoubleClick}
       onContextMenu={handleContextMenu}
       onDragMove={onDragMove}

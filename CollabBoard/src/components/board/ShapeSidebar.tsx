@@ -2,127 +2,121 @@ import { useRef, useState } from 'react';
 
 interface ShapeSidebarProps {
   onShapeClick?: (shapeType: 'rectangle' | 'sticky' | 'text') => void;
+  /** Called when a shape drag starts or ends (for drop-zone feedback) */
+  onDragStateChange?: (isDragging: boolean) => void;
 }
 
-interface ShapeTemplate {
-  type: 'rectangle' | 'sticky' | 'text';
+/** Icon-only sticky note (folded corner) for left bar */
+const StickyIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 4h14l4 4v12H4V4z" fill="#FFD54F" stroke="#FFA000" />
+    <path d="M18 4v4h4" fill="none" stroke="#FFB300" />
+  </svg>
+);
+
+/** Capital T for text tool */
+const TextIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <text x="12" y="18" textAnchor="middle" dominantBaseline="alphabetic" fontSize="18" fontWeight="700" fontFamily="system-ui, sans-serif" fill="currentColor" stroke="none">
+      T
+    </text>
+  </svg>
+);
+
+/** PlayStation-style 2x2: top-left square, top-right circle, bottom-left triangle, bottom-right diagonal arrow */
+const ShapesIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="2" width="6" height="6" rx="0.5" />
+    <circle cx="17" cy="5" r="3" />
+    <path d="M1 20l4-6 4 6H1z" />
+    <path d="M12 20L18 14M18 14l-2 1.5M18 14l-1.5 2" />
+  </svg>
+);
+
+/** Rectangle icon for shapes panel */
+const RectanglePanelIcon = () => (
+  <svg width="32" height="24" viewBox="0 0 40 30">
+    <rect x="2" y="2" width="36" height="26" fill="#90CAF9" stroke="#2196F3" strokeWidth="2" rx="2" />
+  </svg>
+);
+
+interface TooltipButtonProps {
   label: string;
+  shortcut?: string;
   icon: React.ReactNode;
+  onClick: () => void;
+  draggable?: boolean;
+  onDragStart?: (e: React.DragEvent) => void;
+  onDragEnd?: () => void;
+  'data-testid': string;
+  'data-shape-type'?: string;
+  'aria-label': string;
+  active?: boolean;
 }
 
-const shapeTemplates: ShapeTemplate[] = [
-  {
-    type: 'rectangle',
-    label: 'Rectangle',
-    icon: (
-      <svg width="40" height="30" viewBox="0 0 40 30">
-        <rect
-          x="2"
-          y="2"
-          width="36"
-          height="26"
-          fill="#90CAF9"
-          stroke="#2196F3"
-          strokeWidth="2"
-          rx="2"
-        />
-      </svg>
-    ),
-  },
-  {
-    type: 'sticky',
-    label: 'Sticky Note',
-    icon: (
-      <svg width="40" height="30" viewBox="0 0 40 30">
-        <rect
-          x="2"
-          y="2"
-          width="36"
-          height="26"
-          fill="#FFD54F"
-          stroke="#FFA000"
-          strokeWidth="2"
-          rx="2"
-        />
-        <path
-          d="M 32 28 L 38 28 L 38 22 Z"
-          fill="#FFB300"
-        />
-        <text
-          x="20"
-          y="12"
-          textAnchor="middle"
-          dominantBaseline="middle"
-          fill="#333"
-          fontSize="7"
-          fontWeight="500"
-          fontFamily="system-ui, sans-serif"
+function TooltipButton({
+  label,
+  shortcut,
+  icon,
+  onClick,
+  draggable = false,
+  onDragStart,
+  onDragEnd,
+  'data-testid': dataTestId,
+  'data-shape-type': dataShapeType,
+  'aria-label': ariaLabel,
+  active = false,
+}: TooltipButtonProps) {
+  const [showTooltip, setShowTooltip] = useState(false);
+  const common = {
+    className: `shape-bar-btn ${active ? 'shape-bar-btn-active' : ''}`,
+    onClick,
+    'data-testid': dataTestId,
+    'aria-label': ariaLabel,
+    onMouseEnter: () => setShowTooltip(true),
+    onMouseLeave: () => setShowTooltip(false),
+  };
+  const content = <span className="shape-bar-btn-icon">{icon}</span>;
+  return (
+    <div className="shape-bar-btn-wrap">
+      {draggable ? (
+        <div
+          {...common}
+          role="button"
+          draggable
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          data-shape-type={dataShapeType}
         >
-          Sticky
-        </text>
-        <text
-          x="20"
-          y="19"
-          textAnchor="middle"
-          dominantBaseline="middle"
-          fill="#333"
-          fontSize="7"
-          fontWeight="500"
-          fontFamily="system-ui, sans-serif"
-        >
-          Note
-        </text>
-      </svg>
-    ),
-  },
-  {
-    type: 'text',
-    label: 'Text',
-    icon: (
-      <svg width="40" height="30" viewBox="0 0 40 30">
-        <rect
-          x="2"
-          y="2"
-          width="36"
-          height="26"
-          fill="none"
-          stroke="#666"
-          strokeWidth="1.5"
-          strokeDasharray="4 3"
-          rx="2"
-        />
-        <text
-          x="20"
-          y="17"
-          textAnchor="middle"
-          dominantBaseline="middle"
-          fill="#333"
-          fontSize="14"
-          fontWeight="bold"
-          fontFamily="system-ui, sans-serif"
-        >
-          T
-        </text>
-      </svg>
-    ),
-  },
-];
+          {content}
+        </div>
+      ) : (
+        <button type="button" {...common}>
+          {content}
+        </button>
+      )}
+      {showTooltip && (
+        <div className="shape-bar-tooltip" role="tooltip">
+          <span className="shape-bar-tooltip-label">{label}</span>
+          {shortcut != null && (
+            <span className="shape-bar-tooltip-shortcut">{shortcut}</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
-const stickyTemplate = shapeTemplates.find((t) => t.type === 'sticky')!;
-const rectangleTemplate = shapeTemplates.find((t) => t.type === 'rectangle')!;
-const textTemplate = shapeTemplates.find((t) => t.type === 'text')!;
-
-export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({ onShapeClick }) => {
+export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({ onShapeClick, onDragStateChange }) => {
   const didDragRef = useRef(false);
-  const [shapesOpen, setShapesOpen] = useState(false);
+  const [shapesPanelOpen, setShapesPanelOpen] = useState(false);
 
   const handleDragStart = (shapeType: 'rectangle' | 'sticky' | 'text', e: React.DragEvent) => {
     didDragRef.current = true;
-
+    onDragStateChange?.(true);
     if (e.dataTransfer) {
       e.dataTransfer.effectAllowed = 'copy';
       e.dataTransfer.setData('shape-type', shapeType);
-
       const img = new Image();
       img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
       e.dataTransfer.setDragImage(img, 0, 0);
@@ -131,6 +125,7 @@ export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({ onShapeClick }) => {
 
   const handleDragEnd = () => {
     didDragRef.current = false;
+    onDragStateChange?.(false);
   };
 
   const handleClick = (shapeType: 'rectangle' | 'sticky' | 'text') => {
@@ -141,69 +136,74 @@ export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({ onShapeClick }) => {
     onShapeClick?.(shapeType);
   };
 
+  const handleShapesButtonClick = () => {
+    if (didDragRef.current) {
+      didDragRef.current = false;
+      return;
+    }
+    setShapesPanelOpen((o) => !o);
+  };
+
   return (
     <div className="shape-sidebar" data-testid="shape-sidebar" role="group" aria-label="Shape tools">
       <div className="shape-sidebar-tools">
-        {/* Sticky note button – label on the yellow shape */}
-        <div
-          className="shape-template shape-template-sticky"
-          data-testid="shape-template-sticky"
-          data-shape-type="sticky"
-          draggable
+        {/* Sticky note */}
+        <TooltipButton
+          label="Sticky note"
+          icon={<StickyIcon />}
           onClick={() => handleClick('sticky')}
+          draggable
           onDragStart={(e) => handleDragStart('sticky', e)}
           onDragEnd={handleDragEnd}
-          role="button"
+          data-testid="shape-template-sticky"
+          data-shape-type="sticky"
           aria-label="Sticky note"
-        >
-          <div className="shape-icon">{stickyTemplate.icon}</div>
-        </div>
+        />
 
-        {/* Shapes dropdown */}
-        <div className="shape-dropdown" role="region" aria-label="Shapes">
-          <button
-            type="button"
-            className={`shape-dropdown-trigger ${shapesOpen ? 'shape-dropdown-trigger-open' : ''}`}
-            onClick={() => setShapesOpen((o) => !o)}
-            aria-expanded={shapesOpen}
-            aria-label="Shapes"
-            data-testid="shape-dropdown-trigger"
-          >
-            <span className="shape-dropdown-chevron" aria-hidden>▼</span>
-            <span className="shape-dropdown-trigger-text">Shapes</span>
-          </button>
-          {shapesOpen && (
-            <div className="shape-dropdown-panel" data-testid="shape-dropdown-panel">
-              <div
-                className="shape-template shape-template-icon-only"
-                data-testid="shape-template-rectangle"
-                data-shape-type="rectangle"
-                draggable
-                onClick={() => handleClick('rectangle')}
-                onDragStart={(e) => handleDragStart('rectangle', e)}
-                onDragEnd={handleDragEnd}
-                role="button"
-                aria-label="Rectangle"
-              >
-                <div className="shape-icon">{rectangleTemplate.icon}</div>
-              </div>
-              <div
-                className="shape-template shape-template-icon-only"
-                data-testid="shape-template-text"
-                data-shape-type="text"
-                draggable
-                onClick={() => handleClick('text')}
-                onDragStart={(e) => handleDragStart('text', e)}
-                onDragEnd={handleDragEnd}
-                role="button"
-                aria-label="Text"
-              >
-                <div className="shape-icon">{textTemplate.icon}</div>
-              </div>
-            </div>
-          )}
-        </div>
+        {/* Text */}
+        <TooltipButton
+          label="Text"
+          icon={<TextIcon />}
+          onClick={() => handleClick('text')}
+          draggable
+          onDragStart={(e) => handleDragStart('text', e)}
+          onDragEnd={handleDragEnd}
+          data-testid="shape-template-text"
+          data-shape-type="text"
+          aria-label="Text"
+        />
+
+        {/* Shapes – toggles panel, not draggable */}
+        <TooltipButton
+          label="Shapes and lines"
+          icon={<ShapesIcon />}
+          onClick={handleShapesButtonClick}
+          data-testid="shape-bar-shapes-btn"
+          aria-label="Shapes and lines"
+          active={shapesPanelOpen}
+        />
       </div>
+
+      {/* Shapes panel – to the right, rectangle only */}
+      {shapesPanelOpen && (
+        <div className="shape-panel" data-testid="shape-panel" role="region" aria-label="Shapes and lines">
+          <div
+            className="shape-panel-item"
+            data-testid="shape-template-rectangle"
+            data-shape-type="rectangle"
+            draggable
+            onClick={() => handleClick('rectangle')}
+            onDragStart={(e) => handleDragStart('rectangle', e)}
+            onDragEnd={handleDragEnd}
+            role="button"
+            aria-label="Rectangle"
+          >
+            <span className="shape-panel-icon">
+              <RectanglePanelIcon />
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

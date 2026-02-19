@@ -26,7 +26,7 @@ export const StylePanel: React.FC<StylePanelProps> = ({
     width: selectedObject ? String(Math.round(selectedObject.width)) : '',
     height: selectedObject ? String(Math.round(selectedObject.height)) : '',
     x: selectedObject ? String(Math.round(selectedObject.x)) : '',
-    y: selectedObject ? String(Math.round(selectedObject.y)) : '',
+    y: selectedObject ? String(Math.round(-selectedObject.y)) : '',
     color: selectedObject ? selectedObject.color : '',
   }));
 
@@ -45,7 +45,7 @@ export const StylePanel: React.FC<StylePanelProps> = ({
       width: String(Math.round(displayValues.width)),
       height: String(Math.round(displayValues.height)),
       x: String(Math.round(displayValues.x)),
-      y: String(Math.round(displayValues.y)),
+      y: String(Math.round(-displayValues.y)),
       color: selectedObject.color,
     });
 
@@ -73,18 +73,21 @@ export const StylePanel: React.FC<StylePanelProps> = ({
     const numValue = parseFloat(localValues[field]);
     
     if (isNaN(numValue)) {
-      // Restore original value if invalid
+      // Restore original value if invalid (Y is displayed as -y)
+      const restoreValue = field === 'y' ? -selectedObject.y : selectedObject[field];
       setLocalValues((prev) => ({
         ...prev,
-        [field]: String(Math.round(selectedObject[field])),
+        [field]: String(Math.round(restoreValue)),
       }));
       return;
     }
 
-    // Apply constraints
+    // Apply constraints; Y display is inverted (display = -storage)
     let finalValue = numValue;
     if (field === 'width' || field === 'height') {
       finalValue = Math.max(MIN_SIZE, numValue);
+    } else if (field === 'y') {
+      finalValue = -numValue;
     }
 
     // Update if value changed
@@ -92,10 +95,11 @@ export const StylePanel: React.FC<StylePanelProps> = ({
       onUpdate({ [field]: finalValue });
     }
 
-    // Update local state with rounded value
+    // Update local state with rounded value (show -y for Y)
+    const displayValue = field === 'y' ? -finalValue : finalValue;
     setLocalValues((prev) => ({
       ...prev,
-      [field]: String(Math.round(finalValue)),
+      [field]: String(Math.round(displayValue)),
     }));
   };
 

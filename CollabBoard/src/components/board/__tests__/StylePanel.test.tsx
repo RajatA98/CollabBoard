@@ -77,13 +77,13 @@ describe('StylePanel', () => {
     expect(xInput.value).toBe('100');
   });
 
-  it('should display y position input with current value', () => {
+  it('should display y position input with current value (y-up: displayed as -storage y)', () => {
     const onUpdate = vi.fn();
     render(<StylePanel selectedObject={mockObject} onUpdate={onUpdate} />);
     
     const yInput = screen.getByLabelText(/^y$/i) as HTMLInputElement;
     expect(yInput).toBeInTheDocument();
-    expect(yInput.value).toBe('200');
+    expect(yInput.value).toBe('-200');
   });
 
   it('should call onUpdate when color changes', () => {
@@ -129,7 +129,7 @@ describe('StylePanel', () => {
     expect(onUpdate).toHaveBeenCalledWith({ x: 150 });
   });
 
-  it('should call onUpdate when y position changes', () => {
+  it('should call onUpdate when y position changes (display y-up; storage is -display)', () => {
     const onUpdate = vi.fn();
     render(<StylePanel selectedObject={mockObject} onUpdate={onUpdate} />);
     
@@ -137,7 +137,7 @@ describe('StylePanel', () => {
     fireEvent.change(yInput, { target: { value: '250' } });
     fireEvent.blur(yInput);
     
-    expect(onUpdate).toHaveBeenCalledWith({ y: 250 });
+    expect(onUpdate).toHaveBeenCalledWith({ y: -250 });
   });
 
   it('should prevent negative width values', () => {

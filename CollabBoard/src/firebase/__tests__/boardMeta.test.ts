@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mockSetDoc = vi.fn();
 const mockUpdateDoc = vi.fn();
 const mockGetDoc = vi.fn();
+const mockDeleteDoc = vi.fn();
 const mockDoc = vi.fn();
 const mockCollection = vi.fn();
 const mockQuery = vi.fn();
@@ -11,11 +12,13 @@ const mockArrayUnion = vi.fn((val) => ({ __arrayUnion: val }));
 const mockArrayRemove = vi.fn((val) => ({ __arrayRemove: val }));
 const mockOnSnapshot = vi.fn();
 const mockServerTimestamp = vi.fn(() => 'SERVER_TIMESTAMP');
+const mockClearObjects = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('firebase/firestore', () => ({
   setDoc: (...args: unknown[]) => mockSetDoc(...args),
   updateDoc: (...args: unknown[]) => mockUpdateDoc(...args),
   getDoc: (...args: unknown[]) => mockGetDoc(...args),
+  deleteDoc: (...args: unknown[]) => mockDeleteDoc(...args),
   doc: (...args: unknown[]) => mockDoc(...args),
   collection: (...args: unknown[]) => mockCollection(...args),
   query: (...args: unknown[]) => mockQuery(...args),
@@ -28,6 +31,10 @@ vi.mock('firebase/firestore', () => ({
 
 vi.mock('../config', () => ({
   db: {},
+}));
+
+vi.mock('../firestore', () => ({
+  clearObjects: (boardId: string) => mockClearObjects(boardId),
 }));
 
 describe('boardMeta helpers', () => {
@@ -116,5 +123,14 @@ describe('boardMeta helpers', () => {
 
     expect(mockWhere).toHaveBeenCalledWith('visibility', '==', 'open');
     expect(mockOnSnapshot).toHaveBeenCalled();
+  });
+
+  it('deleteBoard should clear objects then delete board meta doc', async () => {
+    const { deleteBoard } = await import('../boardMeta');
+    await deleteBoard('board-1');
+
+    expect(mockClearObjects).toHaveBeenCalledWith('board-1');
+    expect(mockDoc).toHaveBeenCalled();
+    expect(mockDeleteDoc).toHaveBeenCalledWith('mock-doc-ref');
   });
 });

@@ -13,10 +13,11 @@ import {
 interface TextElementProps {
   object: BoardObject;
   isSelected: boolean;
-  onSelect: () => void;
+  onSelect: (additive: boolean) => void;
   onUpdate: (updates: Partial<BoardObject>) => void;
   onDoubleClick?: () => void;
   onRightClick?: (screenX: number, screenY: number) => void;
+  onDragStart?: () => void;
   onDragMove?: (e: KonvaEventObject<DragEvent>) => void;
   onDragEndExtra?: () => void;
   remoteEditing?: LiveEditingData;
@@ -30,6 +31,7 @@ export function TextElement({
   onUpdate,
   onDoubleClick,
   onRightClick,
+  onDragStart,
   onDragMove,
   onDragEndExtra,
   remoteEditing,
@@ -65,15 +67,13 @@ export function TextElement({
       const pointer = stage?.getPointerPosition();
       if (pointer) onRightClick?.(pointer.x, pointer.y);
     } else {
-      onSelect();
+      onSelect(!!(e.evt?.ctrlKey || e.evt?.metaKey));
     }
   };
 
   const handleContextMenu = (e: KonvaEventObject<MouseEvent>) => {
     e.evt.preventDefault();
-    const stage = e.target.getStage();
-    const pointer = stage?.getPointerPosition();
-    if (pointer) onRightClick?.(pointer.x, pointer.y);
+    onRightClick?.(e.evt.clientX, e.evt.clientY);
   };
 
   const displayText = remoteEditing
@@ -90,8 +90,9 @@ export function TextElement({
       rotation={object.rotation || 0}
       draggable
       onClick={handleClick}
-      onTap={onSelect}
+      onTap={() => onSelect(false)}
       onDblClick={handleDoubleClick}
+      onDragStart={onDragStart}
       onDblTap={handleDoubleClick}
       onContextMenu={handleContextMenu}
       onDragMove={onDragMove}

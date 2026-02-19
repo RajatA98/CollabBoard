@@ -10,7 +10,7 @@ type Tab = 'my-boards' | 'join-board';
 
 export function Dashboard() {
   const { user, logout } = useAuth();
-  const { myBoards, joinableBoards, loading, createBoard, joinBoard } = useBoards(user);
+  const { myBoards, joinableBoards, loading, createBoard, joinBoard, deleteBoard } = useBoards(user);
   const [activeTab, setActiveTab] = useState<Tab>('my-boards');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const navigate = useNavigate();
@@ -42,6 +42,19 @@ export function Dashboard() {
   const handleLogout = useCallback(async () => {
     await logout();
   }, [logout]);
+
+  const handleDeleteBoard = useCallback(
+    async (boardId: string, boardName: string) => {
+      if (!window.confirm(`Delete "${boardName}"? This cannot be undone.`)) return;
+      try {
+        await deleteBoard(boardId);
+      } catch (err) {
+        console.error('Failed to delete board:', err);
+        window.alert('Failed to delete board. You may only delete boards you created.');
+      }
+    },
+    [deleteBoard]
+  );
 
   return (
     <div className="dashboard-page">
@@ -97,6 +110,11 @@ export function Dashboard() {
                       board={board}
                       actionLabel="Open"
                       onAction={() => handleOpenBoard(board.id)}
+                      onDelete={
+                        board.creatorId === user?.uid
+                          ? () => handleDeleteBoard(board.id, board.name || 'Untitled')
+                          : undefined
+                      }
                     />
                   ))
                 )}

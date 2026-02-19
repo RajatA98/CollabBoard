@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { Toolbar } from '../Toolbar';
@@ -14,10 +14,14 @@ vi.mock('react-router-dom', async () => {
   };
 });
 
-function renderToolbar(props: { onLogout?: () => void } = {}) {
+function renderToolbar(props: { boardName?: string; onBoardNameChange?: (name: string) => void; onLogout?: () => void } = {}) {
   return render(
     <MemoryRouter>
-      <Toolbar {...props} />
+      <Toolbar
+        boardName={props.boardName ?? 'My Board'}
+        onBoardNameChange={props.onBoardNameChange ?? vi.fn()}
+        onLogout={props.onLogout}
+      />
     </MemoryRouter>
   );
 }
@@ -28,9 +32,14 @@ describe('Toolbar', () => {
     expect(screen.getByTestId('toolbar')).toBeInTheDocument();
   });
 
-  it('should render toolbar brand', () => {
-    renderToolbar();
-    expect(screen.getByText('CollabBoard')).toBeInTheDocument();
+  it('should render board name', () => {
+    renderToolbar({ boardName: 'My Board' });
+    expect(screen.getByTestId('board-name')).toHaveTextContent('My Board');
+  });
+
+  it('should show Untitled when board name is blank', () => {
+    renderToolbar({ boardName: 'Untitled' });
+    expect(screen.getByTestId('board-name')).toHaveTextContent('Untitled');
   });
 
   it('should navigate to dashboard when Back to boards is clicked', async () => {
@@ -41,12 +50,28 @@ describe('Toolbar', () => {
     expect(navigateMock).toHaveBeenCalledWith('/dashboard');
   });
 
-  it('should navigate to dashboard when brand is clicked', async () => {
+  it('should show input when board name is clicked', async () => {
     const user = userEvent.setup();
-    renderToolbar();
+    renderToolbar({ boardName: 'My Board' });
 
-    await user.click(screen.getByRole('link', { name: /back to dashboard/i }));
-    expect(navigateMock).toHaveBeenCalledWith('/dashboard');
+    await user.click(screen.getByTestId('board-name'));
+    expect(screen.getByTestId('board-name-input')).toBeInTheDocument();
+    expect(screen.getByTestId('board-name-input')).toHaveValue('My Board');
+  });
+
+  it('should call onBoardNameChange when editing and blurring', async () => {
+    const user = userEvent.setup();
+    const onBoardNameChange = vi.fn();
+    renderToolbar({ boardName: 'My Board', onBoardNameChange });
+
+    await user.click(screen.getByTestId('board-name'));
+    const input = screen.getByTestId('board-name-input');
+    await user.clear(input);
+    await user.type(input, 'New Name');
+    await act(async () => {
+      input.blur();
+    });
+    expect(onBoardNameChange).toHaveBeenCalledWith('New Name');
   });
 
   it('should render logout button when onLogout is provided', () => {

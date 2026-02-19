@@ -41,6 +41,7 @@ const defaultBoards = {
   createBoard: vi.fn(),
   joinBoard: vi.fn(),
   leaveBoard: vi.fn(),
+  deleteBoard: vi.fn(),
 };
 
 function renderDashboard() {
@@ -228,5 +229,36 @@ describe('Dashboard', () => {
     mockUseBoards.mockReturnValue({ ...defaultBoards, loading: true });
     renderDashboard();
     expect(screen.getByText('Loading boards...')).toBeInTheDocument();
+  });
+
+  it('shows Delete button for boards user created and calls deleteBoard on confirm', async () => {
+    const user = userEvent.setup();
+    const mockDeleteBoard = vi.fn().mockResolvedValue(undefined);
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    mockUseBoards.mockReturnValue({
+      ...defaultBoards,
+      deleteBoard: mockDeleteBoard,
+      myBoards: [
+        {
+          id: 'b1',
+          name: 'My Board',
+          creatorId: 'u1',
+          creatorName: 'Test User',
+          members: ['u1'],
+          memberNames: { u1: 'Test User' },
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          visibility: 'open',
+        },
+      ],
+    });
+
+    renderDashboard();
+    expect(screen.getByTestId('delete-board-btn')).toBeInTheDocument();
+    await user.click(screen.getByTestId('delete-board-btn'));
+
+    expect(confirmSpy).toHaveBeenCalledWith('Delete "My Board"? This cannot be undone.');
+    expect(mockDeleteBoard).toHaveBeenCalledWith('b1');
+    confirmSpy.mockRestore();
   });
 });

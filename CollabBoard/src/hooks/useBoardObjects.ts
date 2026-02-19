@@ -42,6 +42,10 @@ export function useBoardObjects(boardId: string) {
 
   const updateObject = useCallback(
     async (objectId: string, updates: Partial<BoardObject>) => {
+      // Optimistic update so undo/redo and other updates reflect immediately in the UI
+      setObjects((prev) =>
+        prev.map((o) => (o.id === objectId ? { ...o, ...updates } : o))
+      );
       await fbUpdateObject(boardId, objectId, updates);
     },
     [boardId]
