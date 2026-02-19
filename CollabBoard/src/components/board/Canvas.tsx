@@ -350,6 +350,13 @@ export function Canvas({
   const handleStageClick = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
       const stage = e.target.getStage();
+      const target = e.target;
+      const isStage = target === stage;
+      const isLayer = (target as Konva.Node).getClassName?.() === 'Layer';
+      if (isStage || isLayer) {
+        onClearSelection();
+        onCanvasClick();
+      }
       const pos = stage?.getPointerPosition();
       if (pos && onLastClickPosition) {
         const worldX = (pos.x - viewport.x) / viewport.scaleX;
@@ -357,7 +364,7 @@ export function Canvas({
         onLastClickPosition({ x: worldX, y: worldY });
       }
     },
-    [viewport, onLastClickPosition]
+    [viewport, onLastClickPosition, onClearSelection, onCanvasClick]
   );
 
   const handleStageContextMenu = useCallback(

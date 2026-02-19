@@ -65,6 +65,7 @@ export function Board() {
     objectType: 'sticky' | 'text';
   } | null>(null);
   const [stylePanelOpen, setStylePanelOpen] = useState(false);
+  const [shapesPanelOpen, setShapesPanelOpen] = useState(false);
   const [boardMeta, setBoardMeta] = useState<BoardMeta | null>(null);
   const [isDraggingShapeFromSidebar, setIsDraggingShapeFromSidebar] = useState(false);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
@@ -240,6 +241,7 @@ export function Board() {
 
   const handleCanvasClick = useCallback(() => {
     setContextMenu(null);
+    setShapesPanelOpen(false);
   }, []);
 
   const handleDeleteSelected = useCallback(() => {
@@ -717,6 +719,8 @@ export function Board() {
         <ShapeSidebar
           onShapeClick={createObjectAtCenter}
           onDragStateChange={setIsDraggingShapeFromSidebar}
+          shapesPanelOpen={shapesPanelOpen}
+          onShapesPanelOpenChange={setShapesPanelOpen}
         />
         <div className="board-main">
           <UndoRedoClearPanel

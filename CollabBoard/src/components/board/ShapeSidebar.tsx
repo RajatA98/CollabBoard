@@ -4,6 +4,9 @@ interface ShapeSidebarProps {
   onShapeClick?: (shapeType: 'rectangle' | 'sticky' | 'text') => void;
   /** Called when a shape drag starts or ends (for drop-zone feedback) */
   onDragStateChange?: (isDragging: boolean) => void;
+  /** Controlled open state for the shapes submenu (e.g. close when canvas is clicked) */
+  shapesPanelOpen?: boolean;
+  onShapesPanelOpenChange?: (open: boolean) => void;
 }
 
 /** Icon-only sticky note (folded corner) for left bar */
@@ -107,9 +110,16 @@ function TooltipButton({
   );
 }
 
-export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({ onShapeClick, onDragStateChange }) => {
+export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({
+  onShapeClick,
+  onDragStateChange,
+  shapesPanelOpen: shapesPanelOpenProp,
+  onShapesPanelOpenChange,
+}) => {
   const didDragRef = useRef(false);
-  const [shapesPanelOpen, setShapesPanelOpen] = useState(false);
+  const [shapesPanelOpenInternal, setShapesPanelOpenInternal] = useState(false);
+  const shapesPanelOpen = shapesPanelOpenProp ?? shapesPanelOpenInternal;
+  const setShapesPanelOpen = onShapesPanelOpenChange ?? setShapesPanelOpenInternal;
 
   const handleDragStart = (shapeType: 'rectangle' | 'sticky' | 'text', e: React.DragEvent) => {
     didDragRef.current = true;
@@ -141,7 +151,7 @@ export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({ onShapeClick, onDrag
       didDragRef.current = false;
       return;
     }
-    setShapesPanelOpen((o) => !o);
+    setShapesPanelOpen(!shapesPanelOpen);
   };
 
   return (
