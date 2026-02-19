@@ -10,6 +10,7 @@ import { StarShape } from './StarShape';
 import { LineShape, buildLinePointObjects } from './LineShape';
 import { ConnectionPoints } from './ConnectionPoints';
 import { TextElement } from './TextElement';
+import { Frame } from './Frame';
 import { RemoteCursor } from './RemoteCursor';
 import { DimensionLabel } from './DimensionLabel';
 import { SelectionRect } from './SelectionRect';
@@ -1056,7 +1057,7 @@ export function Canvas({
   }, [drawingConnection, objects, onConnectShapes]);
 
   // ── Line endpoint drag with snap ────────────────────────────────────────
-  const nonLineObjects = objects.filter(o => o.type !== 'line');
+  const nonLineObjects = objects.filter(o => o.type !== 'line' && o.type !== 'frame');
 
   const findNearestSnap = useCallback((wx: number, wy: number, excludeShapeId?: string): SnapCandidate | null => {
     let best: SnapCandidate | null = null;
@@ -1234,6 +1235,11 @@ export function Canvas({
         {/* Render non-selected objects first so selected objects + Transformer draw on top */}
         {objects
           .filter((obj) => !selectedObjectIds.includes(obj.id))
+          .sort((a, b) => {
+            if (a.type === 'frame' && b.type !== 'frame') return -1;
+            if (a.type !== 'frame' && b.type === 'frame') return 1;
+            return 0;
+          })
           .map((obj) => {
             const remoteXform = remoteTransformByObjectId[obj.id];
             const remoteEdit = remoteEditingByObjectId[obj.id];
@@ -1266,6 +1272,8 @@ export function Canvas({
                 return <StarShape {...commonProps} />;
               case 'line':
                 return <LineShape {...commonProps} object={displayObj} />;
+              case 'frame':
+                return <Frame {...commonProps} />;
               default:
                 return <Rectangle {...commonProps} />;
             }
@@ -1274,6 +1282,11 @@ export function Canvas({
         {selectedObjectIds.length > 0 &&
           objects
             .filter((obj) => selectedObjectIds.includes(obj.id))
+            .sort((a, b) => {
+              if (a.type === 'frame' && b.type !== 'frame') return -1;
+              if (a.type !== 'frame' && b.type === 'frame') return 1;
+              return 0;
+            })
             .map((obj) => {
               const remoteXform = remoteTransformByObjectId[obj.id];
               const remoteEdit = remoteEditingByObjectId[obj.id];
@@ -1318,6 +1331,8 @@ export function Canvas({
                       return <StarShape {...selectedCommon} />;
                     case 'line':
                       return <LineShape {...selectedCommon} object={displayObject} />;
+                    case 'frame':
+                      return <Frame {...selectedCommon} />;
                     default:
                       return <Rectangle {...selectedCommon} />;
                   }
@@ -1364,7 +1379,8 @@ export function Canvas({
                 }
                 rotateAnchorOffset={24}
                 boundBoxFunc={(oldBox, newBox) => {
-                  if (newBox.width < MIN_OBJECT_SIZE || newBox.height < MIN_OBJECT_SIZE) return oldBox;
+                  const minSize = singleObj?.type === 'frame' ? 100 : MIN_OBJECT_SIZE;
+                  if (newBox.width < minSize || newBox.height < minSize) return oldBox;
                   return newBox;
                 }}
                 onTransformStart={() => {
@@ -1642,7 +1658,7 @@ export function Canvas({
           />
         )}
         {/* Connection-point X overlays — use display object so X's stick during drag/transform */}
-        {objects.map(o => {
+        {objects.filter(o => o.type !== 'frame').map(o => {
           const showXs = (hoveredShapeId === o.id || drawingConnection !== null) && !isDraggingNode;
           if (!showXs) return null;
           const isSelected = selectedObjectIds.includes(o.id);

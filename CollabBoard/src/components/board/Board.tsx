@@ -62,7 +62,7 @@ export function Board() {
     width: number;
     height: number;
     text: string;
-    objectType: 'sticky' | 'text';
+    objectType: 'sticky' | 'text' | 'frame';
   } | null>(null);
   const [stylePanelOpen, setStylePanelOpen] = useState(false);
   const [shapesPanelOpen, setShapesPanelOpen] = useState(false);
@@ -151,7 +151,7 @@ export function Board() {
     selectedCount: selectedObjectIds.length,
   });
 
-  const createObjectAtCenter = useCallback((type: 'rectangle' | 'sticky' | 'text' | 'circle' | 'line' | 'arrow-single' | 'arrow-double' | 'triangle' | 'star') => {
+  const createObjectAtCenter = useCallback((type: 'rectangle' | 'sticky' | 'text' | 'circle' | 'line' | 'arrow-single' | 'arrow-double' | 'triangle' | 'star' | 'frame') => {
     if (!user) {
       console.error('❌ No user found - cannot create object');
       return;
@@ -279,6 +279,25 @@ export function Board() {
         updatedBy: user.uid,
       };
       console.log('⭐ Creating star:', newObject);
+    } else if (type === 'frame') {
+      const frameWidth = 300;
+      const frameHeight = 200;
+      const existingFrameCount = objects.filter(o => o.type === 'frame').length;
+      newObject = {
+        id,
+        type: 'frame',
+        x: worldCenterX - (frameWidth / 2),
+        y: worldCenterY - (frameHeight / 2),
+        width: frameWidth,
+        height: frameHeight,
+        rotation: 0,
+        text: `Frame ${existingFrameCount + 1}`,
+        color: '#3366ff',
+        createdBy: user.uid,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        updatedBy: user.uid,
+      };
     } else {
       const rectWidth = 200;
       const rectHeight = 150;
@@ -308,7 +327,7 @@ export function Board() {
       .catch((err) => {
         console.error(`❌ Failed to add ${type} to Firestore:`, err);
       });
-  }, [addObject, user, viewport, pushAction]);
+  }, [addObject, user, viewport, pushAction, objects]);
 
   const handleCanvasClick = useCallback(() => {
     setContextMenu(null);
@@ -455,16 +474,20 @@ export function Board() {
   const handleTextSubmit = useCallback(
     (text: string) => {
       if (editingObject) {
+        // For frames, prevent empty titles
+        const finalText = editingObject.objectType === 'frame'
+          ? (text.trim() || 'Untitled Frame')
+          : text;
         // Use current object text from store so undo restores the correct value (avoids stale editingObject)
         const obj = objects.find((o) => o.id === editingObject.id);
         const beforeText = (obj?.text ?? editingObject.text) ?? '';
-        if (beforeText !== text) {
+        if (beforeText !== finalText) {
           pushAction({
             type: 'update',
-            changes: [{ id: editingObject.id, before: { text: beforeText }, after: { text } }],
+            changes: [{ id: editingObject.id, before: { text: beforeText }, after: { text: finalText } }],
           });
         }
-        updateObject(editingObject.id, { text });
+        updateObject(editingObject.id, { text: finalText });
         clearEditing();
         setEditingObject(null);
       }
@@ -501,13 +524,34 @@ export function Board() {
     [viewport, broadcastEditing]
   );
 
+  const openFrameTitleEditor = useCallback(
+    (obj: BoardObject) => {
+      const { x: screenX, y: screenY } = worldToScreen(obj.x, obj.y - 22, viewport);
+      const screenWidth = Math.min(obj.width * viewport.scaleX, 400);
+      setEditingObject({
+        id: obj.id,
+        x: screenX,
+        y: screenY,
+        width: screenWidth,
+        height: 24 * viewport.scaleY,
+        text: obj.text || '',
+        objectType: 'frame',
+      });
+      setSelectedObjectIds([obj.id]);
+      broadcastEditing(obj.id, obj.text ?? '');
+    },
+    [viewport, broadcastEditing]
+  );
+
   const handleObjectDoubleClick = useCallback(
     (obj: BoardObject) => {
       if (obj.type === 'sticky' || obj.type === 'text') {
         openTextEditorForObject(obj);
+      } else if (obj.type === 'frame') {
+        openFrameTitleEditor(obj);
       }
     },
-    [openTextEditorForObject]
+    [openTextEditorForObject, openFrameTitleEditor]
   );
 
   const handleObjectRightClick = useCallback(
@@ -575,7 +619,7 @@ export function Board() {
   );
 
   const handleShapeDrop = useCallback(
-    (shapeType: 'rectangle' | 'sticky' | 'text' | 'circle' | 'line' | 'arrow-single' | 'arrow-double' | 'triangle' | 'star', screenX: number, screenY: number) => {
+    (shapeType: 'rectangle' | 'sticky' | 'text' | 'circle' | 'line' | 'arrow-single' | 'arrow-double' | 'triangle' | 'star' | 'frame', screenX: number, screenY: number) => {
       if (!user) {
         console.error('❌ No user found - cannot create object');
         return;
@@ -698,6 +742,25 @@ export function Board() {
           updatedAt: Date.now(),
           updatedBy: user.uid,
         };
+      } else if (shapeType === 'frame') {
+        const frameWidth = 300;
+        const frameHeight = 200;
+        const existingFrameCount = objects.filter(o => o.type === 'frame').length;
+        newObject = {
+          id,
+          type: 'frame',
+          x: worldPos.x - frameWidth / 2,
+          y: worldPos.y - frameHeight / 2,
+          width: frameWidth,
+          height: frameHeight,
+          rotation: 0,
+          text: `Frame ${existingFrameCount + 1}`,
+          color: '#3366ff',
+          createdBy: user.uid,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          updatedBy: user.uid,
+        };
       } else {
         const rectWidth = 200;
         const rectHeight = 150;
@@ -727,7 +790,7 @@ export function Board() {
           console.error(`❌ Failed to add ${shapeType}:`, err);
         });
     },
-    [addObject, user, pushAction]
+    [addObject, user, pushAction, objects]
   );
 
   const handleCanvasDragOver = useCallback((e: React.DragEvent) => {
@@ -752,7 +815,7 @@ export function Board() {
       const now = Date.now();
       if (now - lastDropHandledAtRef.current < 300) return;
       lastDropHandledAtRef.current = now;
-      const shapeType = e.dataTransfer.getData('shape-type') as 'rectangle' | 'sticky' | 'text' | 'circle' | 'line' | 'arrow-single' | 'arrow-double' | 'triangle' | 'star';
+      const shapeType = e.dataTransfer.getData('shape-type') as 'rectangle' | 'sticky' | 'text' | 'circle' | 'line' | 'arrow-single' | 'arrow-double' | 'triangle' | 'star' | 'frame';
       if (shapeType && canvasContainerRef.current) {
         const rect = canvasContainerRef.current.getBoundingClientRect();
         const x = e.clientX - rect.left;
@@ -843,6 +906,10 @@ export function Board() {
       if (e.key === 't' && !e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
         createObjectAtCenter('text');
+      }
+      if (e.key === 'f' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        createObjectAtCenter('frame');
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -959,7 +1026,12 @@ export function Board() {
                     openTextEditorForObject(contextMenuObject);
                     setContextMenu(null);
                   }
-                : undefined
+                : contextMenuObject && contextMenuObject.type === 'frame'
+                  ? () => {
+                      openFrameTitleEditor(contextMenuObject);
+                      setContextMenu(null);
+                    }
+                  : undefined
             }
             onCopy={handleCopySelected}
             onCut={handleCutSelected}

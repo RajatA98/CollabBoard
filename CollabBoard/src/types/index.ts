@@ -5,7 +5,7 @@ export interface Waypoint {
 
 export interface BoardObject {
   id: string;
-  type: 'sticky' | 'rectangle' | 'circle' | 'line' | 'text' | 'triangle' | 'star';
+  type: 'sticky' | 'rectangle' | 'circle' | 'line' | 'text' | 'triangle' | 'star' | 'frame';
   x: number;
   y: number;
   width: number;

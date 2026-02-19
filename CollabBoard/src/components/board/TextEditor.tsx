@@ -7,7 +7,7 @@ interface TextEditorProps {
   height: number;
   text: string;
   color?: string;
-  objectType?: 'sticky' | 'text';
+  objectType?: 'sticky' | 'text' | 'frame';
   onSubmit: (text: string) => void;
   onCancel: () => void;
   onTextChange?: (text: string) => void;
@@ -52,6 +52,7 @@ export function TextEditor({ x, y, width, height, text, color = '#FFD54F', objec
   };
 
   const isTextType = objectType === 'text';
+  const isFrameType = objectType === 'frame';
 
   return (
     <textarea
@@ -62,34 +63,43 @@ export function TextEditor({ x, y, width, height, text, color = '#FFD54F', objec
         left: x,
         top: y,
         width,
-        height: textareaHeight,
-        padding: '8px',
-        fontSize: '16px',
-        fontFamily: isTextType
-          ? "'Segoe UI', system-ui, sans-serif"
-          : "'Segoe Print', 'Comic Sans MS', cursive",
-        border: isTextType
-          ? '2px dashed #4285f4'
-          : '3px solid #FFA726',
-        borderRadius: '2px',
+        height: isFrameType ? height : textareaHeight,
+        padding: isFrameType ? '2px 8px' : '8px',
+        fontSize: isFrameType ? '13px' : '16px',
+        fontFamily: isFrameType
+          ? "system-ui, sans-serif"
+          : isTextType
+            ? "'Segoe UI', system-ui, sans-serif"
+            : "'Segoe Print', 'Comic Sans MS', cursive",
+        fontWeight: isFrameType ? 'bold' : 'normal',
+        border: isFrameType
+          ? '2px solid #3366ff'
+          : isTextType
+            ? '2px dashed #4285f4'
+            : '3px solid #FFA726',
+        borderRadius: isFrameType ? '4px 4px 0 0' : '2px',
         resize: 'none',
         outline: 'none',
-        background: isTextType ? 'rgba(255,255,255,0.95)' : color,
-        color: '#333',
+        background: isFrameType ? '#3366ff' : isTextType ? 'rgba(255,255,255,0.95)' : color,
+        color: isFrameType ? '#ffffff' : '#333',
         zIndex: 1000,
-        boxShadow: isTextType
-          ? '0 2px 8px rgba(0,0,0,0.1)'
-          : '2px 4px 8px rgba(0,0,0,0.3)',
+        boxShadow: isFrameType
+          ? '0 2px 8px rgba(0,0,0,0.2)'
+          : isTextType
+            ? '0 2px 8px rgba(0,0,0,0.1)'
+            : '2px 4px 8px rgba(0,0,0,0.3)',
         overflow: 'hidden',
       }}
       value={value}
+      maxLength={isFrameType ? 50 : undefined}
+      rows={isFrameType ? 1 : undefined}
       onChange={(e) => {
         setValue(e.target.value);
         onTextChange?.(e.target.value);
       }}
       onBlur={handleBlur}
       onKeyDown={handleKeyDown}
-      placeholder={isTextType ? 'Type here...' : 'Type your note...'}
+      placeholder={isFrameType ? 'Frame title...' : isTextType ? 'Type here...' : 'Type your note...'}
     />
   );
 }

@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 
-type ShapeType = 'rectangle' | 'sticky' | 'text' | 'circle' | 'line' | 'arrow-single' | 'arrow-double' | 'triangle' | 'star';
+type ShapeType = 'rectangle' | 'sticky' | 'text' | 'circle' | 'line' | 'arrow-single' | 'arrow-double' | 'triangle' | 'star' | 'frame';
 
 interface ShapeSidebarProps {
   onShapeClick?: (shapeType: ShapeType) => void;
@@ -87,6 +87,14 @@ const ArrowDoublePanelIcon = () => (
     <line x1="4" y1="26" x2="36" y2="4" stroke="#424242" strokeWidth="2" strokeLinecap="round" />
     <polyline points="28,4 36,4 36,12" fill="none" stroke="#424242" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     <polyline points="12,26 4,26 4,18" fill="none" stroke="#424242" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+/** Frame icon for shapes panel */
+const FramePanelIcon = () => (
+  <svg width="32" height="24" viewBox="0 0 40 30">
+    <rect x="2" y="8" width="36" height="20" fill="rgba(51,102,255,0.1)" stroke="#3366ff" strokeWidth="2" />
+    <rect x="2" y="2" width="16" height="7" fill="#3366ff" rx="1" />
   </svg>
 );
 
@@ -347,6 +355,21 @@ export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({
           >
             <span className="shape-panel-icon">
               <ArrowDoublePanelIcon />
+            </span>
+          </div>
+          <div
+            className="shape-panel-item"
+            data-testid="shape-template-frame"
+            data-shape-type="frame"
+            draggable
+            onClick={() => handleClick('frame')}
+            onDragStart={(e) => handleDragStart('frame', e)}
+            onDragEnd={handleDragEnd}
+            role="button"
+            aria-label="Frame"
+          >
+            <span className="shape-panel-icon">
+              <FramePanelIcon />
             </span>
           </div>
         </div>

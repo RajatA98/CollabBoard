@@ -4,7 +4,7 @@ export interface ContextMenuProps {
   x: number;
   y: number;
   /** When undefined (e.g. right-click on empty board), Edit Text is hidden. */
-  objectType?: 'sticky' | 'rectangle' | 'text' | 'circle' | 'line' | 'triangle' | 'star';
+  objectType?: 'sticky' | 'rectangle' | 'text' | 'circle' | 'line' | 'triangle' | 'star' | 'frame';
   onEditText?: () => void;
   onCopy?: () => void;
   onCut?: () => void;
@@ -78,14 +78,14 @@ export function ContextMenu({
         minWidth: 180,
       }}
     >
-      {(objectType === 'sticky' || objectType === 'text') && onEditText && (
+      {(objectType === 'sticky' || objectType === 'text' || objectType === 'frame') && onEditText && (
         <button
           type="button"
           className="context-menu-item"
           onClick={() => onEditText()}
           data-testid="context-menu-edit-text"
         >
-          Edit Text
+          {objectType === 'frame' ? 'Rename' : 'Edit Text'}
         </button>
       )}
       {onCopy && (
