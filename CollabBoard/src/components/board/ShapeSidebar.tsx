@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 
-type ShapeType = 'rectangle' | 'sticky' | 'text' | 'circle' | 'line' | 'arrow-single' | 'arrow-double';
+type ShapeType = 'rectangle' | 'sticky' | 'text' | 'circle' | 'line' | 'arrow-single' | 'arrow-double' | 'triangle' | 'star';
 
 interface ShapeSidebarProps {
   onShapeClick?: (shapeType: ShapeType) => void;
@@ -49,6 +49,20 @@ const RectanglePanelIcon = () => (
 const CirclePanelIcon = () => (
   <svg width="32" height="24" viewBox="0 0 40 30">
     <ellipse cx="20" cy="15" rx="16" ry="12" fill="#CE93D8" stroke="#9C27B0" strokeWidth="2" />
+  </svg>
+);
+
+/** Triangle icon for shapes panel */
+const TrianglePanelIcon = () => (
+  <svg width="32" height="24" viewBox="0 0 40 30">
+    <polygon points="20,2 2,28 38,28" fill="#81C784" stroke="#388E3C" strokeWidth="2" />
+  </svg>
+);
+
+/** Star icon for shapes panel */
+const StarPanelIcon = () => (
+  <svg width="32" height="24" viewBox="0 0 40 30">
+    <polygon points="20,2 24,12 36,12 27,19 30,28 20,22 10,28 13,19 4,12 16,12" fill="#FFB74D" stroke="#F57C00" strokeWidth="2" />
   </svg>
 );
 
@@ -258,6 +272,36 @@ export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({
           >
             <span className="shape-panel-icon">
               <CirclePanelIcon />
+            </span>
+          </div>
+          <div
+            className="shape-panel-item"
+            data-testid="shape-template-triangle"
+            data-shape-type="triangle"
+            draggable
+            onClick={() => handleClick('triangle')}
+            onDragStart={(e) => handleDragStart('triangle', e)}
+            onDragEnd={handleDragEnd}
+            role="button"
+            aria-label="Triangle"
+          >
+            <span className="shape-panel-icon">
+              <TrianglePanelIcon />
+            </span>
+          </div>
+          <div
+            className="shape-panel-item"
+            data-testid="shape-template-star"
+            data-shape-type="star"
+            draggable
+            onClick={() => handleClick('star')}
+            onDragStart={(e) => handleDragStart('star', e)}
+            onDragEnd={handleDragEnd}
+            role="button"
+            aria-label="Star"
+          >
+            <span className="shape-panel-icon">
+              <StarPanelIcon />
             </span>
           </div>
           <div

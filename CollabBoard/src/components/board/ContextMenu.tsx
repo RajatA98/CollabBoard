@@ -4,7 +4,7 @@ export interface ContextMenuProps {
   x: number;
   y: number;
   /** When undefined (e.g. right-click on empty board), Edit Text is hidden. */
-  objectType?: 'sticky' | 'rectangle' | 'text' | 'circle' | 'line';
+  objectType?: 'sticky' | 'rectangle' | 'text' | 'circle' | 'line' | 'triangle' | 'star';
   onEditText?: () => void;
   onCopy?: () => void;
   onCut?: () => void;
