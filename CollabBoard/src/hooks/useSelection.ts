@@ -15,7 +15,7 @@ export type RemoteSelectionByObject = Record<
 >;
 
 export function useSelection(boardId: string, user: AppUser | null) {
-  const [remoteSelections, setRemoteSelections] = useState<Record<string, SelectionData>>({});
+  const [_remoteSelections, setRemoteSelections] = useState<Record<string, SelectionData>>({});
   const [remoteSelectionByObject, setRemoteSelectionByObject] = useState<RemoteSelectionByObject>({});
 
   useEffect(() => {

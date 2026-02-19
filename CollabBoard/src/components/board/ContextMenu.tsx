@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react';
 export interface ContextMenuProps {
   x: number;
   y: number;
+  /** When undefined (e.g. right-click on empty board), Edit Text is hidden. */
   objectType?: 'sticky' | 'rectangle' | 'text';
   onEditText?: () => void;
   onCopy?: () => void;
@@ -74,7 +75,7 @@ export function ContextMenu({
         borderRadius: 8,
         boxShadow: '0 2px 10px rgba(0,0,0,0.2)',
         padding: '4px 0',
-        minWidth: 160,
+        minWidth: 180,
       }}
     >
       {(objectType === 'sticky' || objectType === 'text') && onEditText && (

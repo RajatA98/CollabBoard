@@ -83,9 +83,9 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
       onClick={handleClick}
       onTap={() => onSelect(false)}
       onDblClick={handleDoubleClick}
-      onDragStart={onDragStart}
       onDblTap={handleDoubleClick}
       onContextMenu={handleContextMenu}
+      onDragStart={onDragStart}
       onDragMove={onDragMove}
       onDragEnd={(e) => {
         onUpdate({ x: e.target.x(), y: e.target.y() });

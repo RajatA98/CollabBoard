@@ -13,11 +13,11 @@ import { useBoardObjects } from '../../hooks/useBoardObjects';
 import { useCursors } from '../../hooks/useCursors';
 import { usePresence } from '../../hooks/usePresence';
 import { useViewport } from '../../hooks/useViewport';
+import { useUndoRedo } from '../../hooks/useUndoRedo';
 import { useLiveTransforms } from '../../hooks/useLiveTransforms';
 import { useLiveEditing } from '../../hooks/useLiveEditing';
 import { useSelection } from '../../hooks/useSelection';
 import { onBoardMetaChange, updateBoardName } from '../../firebase/boardMeta';
-import { useUndoRedo } from '../../hooks/useUndoRedo';
 import { screenToWorld, worldToScreen } from '../../utils/coordinates';
 import type { BoardObject, BoardMeta } from '../../types';
 
@@ -114,7 +114,6 @@ export function Board() {
 
   const selectObject = useCallback(
     (id: string, additive: boolean) => {
-      // Don't select an object another user has selected (selection lock)
       if (remoteSelectionByObject[id]) return;
       if (additive) {
         setSelectedObjectIds((prev) =>
@@ -132,7 +131,6 @@ export function Board() {
     setContextMenu(null);
   }, []);
 
-  // Sync single selection to RTDB so other users see lock; clear when multi or none
   useEffect(() => {
     setLocalSelection(selectedObjectIds.length === 1 ? selectedObjectIds[0] : null);
   }, [selectedObjectIds, setLocalSelection]);
@@ -160,7 +158,6 @@ export function Board() {
 
     console.log(`✅ User exists, creating ${type}...`);
 
-    // Center of browser (same as init viewport so (0,0) is at center)
     const screenCenterX = window.innerWidth / 2;
     const screenCenterY = (window.innerHeight - 48) / 2;
     const { x: worldCenterX, y: worldCenterY } = screenToWorld(
@@ -184,7 +181,7 @@ export function Board() {
         height: noteHeight,
         rotation: 0,
         text: '',
-        color: '#FFD54F', // Classic sticky note yellow
+        color: '#FFD54F',
         createdBy: user.uid,
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -221,7 +218,7 @@ export function Board() {
         width: rectWidth,
         height: rectHeight,
         rotation: 0,
-        color: '#90CAF9', // Light blue
+        color: '#90CAF9',
         createdBy: user.uid,
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -436,7 +433,6 @@ export function Board() {
       if (obj.type === 'sticky' || obj.type === 'text') {
         openTextEditorForObject(obj);
       }
-      // Rectangle: no-op on double-click
     },
     [openTextEditorForObject]
   );
@@ -477,13 +473,11 @@ export function Board() {
         return;
       }
 
-      // Use current viewport at drop time (ref) so pan/zoom during drag doesn't use stale values
       const v = viewportRef.current;
       const scaleX = Math.min(100, Math.max(0.01, v.scaleX));
       const scaleY = Math.min(100, Math.max(0.01, v.scaleY));
       const safeViewport = { ...v, scaleX, scaleY };
       let worldPos = screenToWorld(screenX, screenY, safeViewport);
-      // Clamp world position to avoid extreme coordinates from edge cases
       const CLAMP = 1e6;
       worldPos = {
         x: Math.max(-CLAMP, Math.min(CLAMP, worldPos.x)),
@@ -649,6 +643,16 @@ export function Board() {
         e.preventDefault();
         redo();
       }
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        if (selectedObjectIds.length > 0) {
+          e.preventDefault();
+          handleDeleteSelected();
+        }
+      }
+      if (e.key === 'd' && (e.metaKey || e.ctrlKey) && selectedObjectIds.length > 0) {
+        e.preventDefault();
+        duplicateSelectedObjects();
+      }
       if (e.key === 'n' && !e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
         createObjectAtCenter('sticky');
@@ -662,10 +666,13 @@ export function Board() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
     editingObject,
+    selectedObjectIds.length,
     selectAll,
     handleCopySelected,
     handleCutSelected,
     handlePaste,
+    handleDeleteSelected,
+    duplicateSelectedObjects,
     undo,
     redo,
     createObjectAtCenter,
@@ -697,6 +704,10 @@ export function Board() {
         boardName={boardDisplayName}
         onBoardNameChange={handleBoardNameChange}
         onLogout={handleLogout}
+        onUndo={undo}
+        onRedo={redo}
+        canUndo={canUndo}
+        canRedo={canRedo}
       />
       <div className="board-content">
         <ShapeSidebar
@@ -713,7 +724,7 @@ export function Board() {
             clearDisabled={objects.length === 0}
           />
           <PresenceBar onlineUsers={onlineUsers} />
-          <div 
+          <div
             ref={canvasContainerRef}
             className={`canvas-area${isDraggingShapeFromSidebar ? ' dragging-shape' : ''}`}
             style={{ position: 'relative' }}
@@ -721,6 +732,7 @@ export function Board() {
             onDragEnter={handleCanvasDragEnter}
             onDragLeave={handleCanvasDragLeave}
             onDrop={handleCanvasDrop}
+            onContextMenu={(e) => e.preventDefault()}
           >
             <Canvas
               objects={objects}

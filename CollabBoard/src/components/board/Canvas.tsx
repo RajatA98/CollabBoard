@@ -15,7 +15,7 @@ interface CanvasProps {
   objects: BoardObject[];
   onObjectUpdate: (id: string, updates: Partial<BoardObject>) => void;
   onBatchObjectUpdate?: (changes: { id: string; updates: Partial<BoardObject> }[]) => void;
-  onObjectDelete: (id: string) => void;
+  onObjectDelete?: (id: string) => void;
   onCanvasClick: () => void;
   onCanvasRightClick?: (screenPos: { x: number; y: number }) => void;
   onLastClickPosition?: (worldPos: { x: number; y: number }) => void;
@@ -75,7 +75,7 @@ export function Canvas({
   viewport,
   setPosition,
   zoomAtPoint,
-  isEditingText = false,
+  isEditingText: _isEditingText = false,
   onLiveTransformChange,
   remoteTransforms = {},
   remoteEditings = {},
@@ -109,6 +109,17 @@ export function Canvas({
   const [isMarqueeSelecting, setIsMarqueeSelecting] = useState(false);
   const [marqueeStart, setMarqueeStart] = useState<{ x: number; y: number } | null>(null);
   const [marqueeEnd, setMarqueeEnd] = useState<{ x: number; y: number } | null>(null);
+
+  const getWorldPointer = useCallback(() => {
+    const stage = stageRef.current;
+    if (!stage) return null;
+    const pointer = stage.getPointerPosition();
+    if (!pointer) return null;
+    return {
+      x: (pointer.x - viewport.x) / viewport.scaleX,
+      y: (pointer.y - viewport.y) / viewport.scaleY,
+    };
+  }, [viewport]);
 
   // One rAF-driven re-render per frame during transform so DimensionLabel reads liveTransformRef without delay
   const startDimensionLabelRafLoop = useCallback(() => {
@@ -146,17 +157,6 @@ export function Canvas({
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
-
-  const getWorldPointer = useCallback(() => {
-    const stage = stageRef.current;
-    if (!stage) return null;
-    const pointer = stage.getPointerPosition();
-    if (!pointer) return null;
-    return {
-      x: (pointer.x - viewport.x) / viewport.scaleX,
-      y: (pointer.y - viewport.y) / viewport.scaleY,
-    };
-  }, [viewport]);
 
   useEffect(() => {
     if (!isMiddleMouseDown) return;
@@ -377,8 +377,7 @@ export function Canvas({
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      if (isEditingText) return;
-      // Don't delete/duplicate when user is editing text in an input (e.g. Style panel)
+      if (_isEditingText) return;
       const active = document.activeElement;
       const isEditingInput =
         active &&
@@ -397,7 +396,7 @@ export function Canvas({
         onDuplicateSelected?.();
       }
     },
-    [selectedObjectIds.length, isEditingText, onDeleteSelected, onDuplicateSelected]
+    [selectedObjectIds.length, _isEditingText, onDeleteSelected, onDuplicateSelected]
   );
 
   useEffect(() => {
@@ -449,6 +448,14 @@ export function Canvas({
     onClearTransform?.();
   }, [onClearTransform]);
 
+  // Compute marquee rect in world coordinates for rendering
+  const marqueeRect = marqueeStart && marqueeEnd ? {
+    x: Math.min(marqueeStart.x, marqueeEnd.x),
+    y: Math.min(marqueeStart.y, marqueeEnd.y),
+    width: Math.abs(marqueeEnd.x - marqueeStart.x),
+    height: Math.abs(marqueeEnd.y - marqueeStart.y),
+  } : null;
+
   return (
     <div style={{ width: '100%', height: '100%', pointerEvents: isDraggingShapeFromSidebar ? 'none' : 'auto' }}>
     <Stage
@@ -470,12 +477,12 @@ export function Canvas({
         <GridBackground viewport={viewport} stageSize={stageSize} />
       </Layer>
       <Layer>
-        {isMarqueeSelecting && marqueeStart && marqueeEnd && (
+        {marqueeRect && isMarqueeSelecting && (
           <SelectionRect
-            x={Math.min(marqueeStart.x, marqueeEnd.x)}
-            y={Math.min(marqueeStart.y, marqueeEnd.y)}
-            width={Math.abs(marqueeEnd.x - marqueeStart.x)}
-            height={Math.abs(marqueeEnd.y - marqueeStart.y)}
+            x={marqueeRect.x}
+            y={marqueeRect.y}
+            width={marqueeRect.width}
+            height={marqueeRect.height}
             visible
           />
         )}
@@ -483,13 +490,11 @@ export function Canvas({
         {objects
           .filter((obj) => !selectedObjectIds.includes(obj.id))
           .map((obj) => {
-            // Apply remote live transform if another user is manipulating this object
             const remoteXform = remoteTransformByObjectId[obj.id];
             const remoteEdit = remoteEditingByObjectId[obj.id];
             const displayObj = remoteXform
               ? { ...obj, x: remoteXform.x, y: remoteXform.y, width: remoteXform.width, height: remoteXform.height, rotation: remoteXform.rotation }
               : obj;
-
             if (obj.type === 'sticky') {
               return (
                 <StickyNote

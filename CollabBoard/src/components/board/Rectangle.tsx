@@ -42,9 +42,9 @@ export function Rectangle({ object, isSelected, onSelect, onUpdate, onDoubleClic
       onClick={handleClick}
       onTap={() => onSelect(false)}
       onDblClick={onDoubleClick}
-      onDragStart={onDragStart}
       onDblTap={onDoubleClick}
       onContextMenu={handleContextMenu}
+      onDragStart={onDragStart}
       onDragMove={onDragMove}
       onDragEnd={(e) => {
         onUpdate({ x: e.target.x(), y: e.target.y() });

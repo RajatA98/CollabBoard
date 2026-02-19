@@ -1,15 +1,15 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { Canvas } from '../Canvas';
 import type { BoardObject, LiveEditingData, LiveTransformData } from '../../../types';
 
 const mockStickyNote = vi.fn((props: Record<string, unknown>) => (
-  <div data-testid="sticky-note" data-remote-editing={props.remoteEditing ? JSON.stringify(props.remoteEditing) : undefined} data-remote-transform={props.remoteTransform ? JSON.stringify(props.remoteTransform) : undefined} data-object-id={props.object?.id}>
-    {props.object?.text}
+  <div data-testid="sticky-note" data-remote-editing={props.remoteEditing ? JSON.stringify(props.remoteEditing) : undefined} data-remote-transform={props.remoteTransform ? JSON.stringify(props.remoteTransform) : undefined} data-object-id={(props.object as BoardObject)?.id}>
+    {(props.object as BoardObject)?.text}
   </div>
 ));
 const mockRectangle = vi.fn((props: Record<string, unknown>) => (
-  <div data-testid="rectangle" data-remote-transform={props.remoteTransform ? JSON.stringify(props.remoteTransform) : undefined} data-object-id={props.object?.id} />
+  <div data-testid="rectangle" data-remote-transform={props.remoteTransform ? JSON.stringify(props.remoteTransform) : undefined} data-object-id={(props.object as BoardObject)?.id} />
 ));
 const mockTextElement = vi.fn((props: Record<string, unknown>) => (
   <div data-testid="text-element" data-remote-editing={props.remoteEditing ? JSON.stringify(props.remoteEditing) : undefined} data-remote-transform={props.remoteTransform ? JSON.stringify(props.remoteTransform) : undefined} data-object-id={props.object?.id}>
@@ -38,7 +38,7 @@ vi.mock('react-konva', () => ({
 vi.mock('../GridBackground', () => ({ GridBackground: () => <div data-testid="grid" /> }));
 vi.mock('../RemoteCursor', () => ({ RemoteCursor: () => null }));
 vi.mock('../DimensionLabel', () => ({ DimensionLabel: () => null }));
-vi.mock('../SelectionRect', () => ({ SelectionRect: () => null }));
+vi.mock('../SelectionRect', () => ({ SelectionRect: () => <div data-testid="selection-rect" /> }));
 
 vi.mock('konva', () => ({
   default: {},
@@ -108,6 +108,11 @@ describe('Canvas', () => {
     updatedBy: 'user-1',
   };
 
+  const baseProps = {
+    ...defaultCanvasProps,
+    objects: [] as BoardObject[],
+  };
+
   beforeEach(() => {
     mockStickyNote.mockClear();
     mockRectangle.mockClear();
@@ -115,38 +120,12 @@ describe('Canvas', () => {
   });
 
   it('should render the stage', () => {
-    render(
-      <Canvas
-        objects={[]}
-        viewport={mockViewport}
-        setPosition={mockSetPosition}
-        zoomAtPoint={mockZoomAtPoint}
-        onObjectUpdate={vi.fn()}
-        onObjectDelete={vi.fn()}
-        onCanvasClick={vi.fn()}
-        selectedObjectIds={[]}
-        onSelectObject={vi.fn()}
-        onClearSelection={vi.fn()}
-      />
-    );
+    render(<Canvas {...baseProps} />);
     expect(screen.getByTestId('konva-stage')).toBeInTheDocument();
   });
 
   it('should render layers', () => {
-    render(
-      <Canvas
-        objects={[]}
-        viewport={mockViewport}
-        setPosition={mockSetPosition}
-        zoomAtPoint={mockZoomAtPoint}
-        onObjectUpdate={vi.fn()}
-        onObjectDelete={vi.fn()}
-        onCanvasClick={vi.fn()}
-        selectedObjectIds={[]}
-        onSelectObject={vi.fn()}
-        onClearSelection={vi.fn()}
-      />
-    );
+    render(<Canvas {...baseProps} />);
     const layers = screen.getAllByTestId('konva-layer');
     expect(layers.length).toBeGreaterThanOrEqual(1);
   });
@@ -271,12 +250,6 @@ describe('Canvas', () => {
     render(
       <Canvas
         objects={[textObject]}
-        onObjectUpdate={vi.fn()}
-        onObjectDelete={vi.fn()}
-        onCanvasClick={vi.fn()}
-        viewport={mockViewport}
-        setPosition={mockSetPosition}
-        zoomAtPoint={mockZoomAtPoint}
         {...defaultCanvasProps}
       />
     );
