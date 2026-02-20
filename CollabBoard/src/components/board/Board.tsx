@@ -126,9 +126,18 @@ export function Board() {
         );
       } else {
         const obj = objects.find((o) => o.id === id);
-        if (obj?.type === 'frame') {
+        if (!obj) {
+          setSelectedObjectIds([id]);
+          return;
+        }
+        // Treat frame group as one: clicking frame or any child selects frame + all its children (marquee transform logic)
+        if (obj.type === 'frame') {
           const childIds = objects.filter((o) => o.frameId === id).map((o) => o.id);
           setSelectedObjectIds([id, ...childIds]);
+        } else if (obj.frameId) {
+          const frameId = obj.frameId;
+          const childIds = objects.filter((o) => o.frameId === frameId).map((o) => o.id);
+          setSelectedObjectIds([frameId, ...childIds]);
         } else {
           setSelectedObjectIds([id]);
         }

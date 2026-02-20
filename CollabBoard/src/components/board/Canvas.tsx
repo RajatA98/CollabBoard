@@ -850,11 +850,7 @@ export function Canvas({
       multiSelectDisplayRef.current.clear();
     } else {
       const nodes = selectedObjectIds
-        .map((id) => {
-          const obj = objects.find(o => o.id === id);
-          if (obj && obj.type === 'line') return null;
-          return stage.findOne('#' + id);
-        })
+        .map((id) => stage.findOne('#' + id))
         .filter((n): n is Konva.Node => n != null);
       transformer.nodes(nodes);
       if (nodes.length > 1) {
@@ -872,8 +868,9 @@ export function Canvas({
           if (!Number.isFinite(h) || h <= 0) h = defH;
           const sx = node.scaleX?.() ?? 1;
           const sy = node.scaleY?.() ?? 1;
-          const rw = Math.max(MIN_OBJECT_SIZE, w * sx);
-          const rh = Math.max(MIN_OBJECT_SIZE, h * sy);
+          const minSize = obj?.type === 'line' ? 0 : MIN_OBJECT_SIZE;
+          const rw = Math.max(minSize, w * sx);
+          const rh = Math.max(minSize, h * sy);
           map.set(id, {
             x: n(node.x(), obj?.x ?? 0),
             y: n(node.y(), obj?.y ?? 0),
@@ -1405,22 +1402,11 @@ export function Canvas({
                 ]}
                 rotateEnabled={true}
                 rotateLineVisible={false}
-                rotateAnchorAngle={
-                  singleObj
-                    ? (() => {
-                        // Frames: use top-right (45°) like shapes so the rotate icon placement matches
-                        if (singleObj.type === 'frame') {
-                          return 45;
-                        }
-                        const w = liveTransform?.width ?? singleObj.width;
-                        const h = liveTransform?.height ?? singleObj.height;
-                        return (Math.atan2(w, h) * 180) / Math.PI;
-                      })()
-                    : 0
-                }
+                rotateAnchorAngle={45}
                 rotateAnchorOffset={24}
                 boundBoxFunc={(oldBox, newBox) => {
-                  if (newBox.width < MIN_OBJECT_SIZE || newBox.height < MIN_OBJECT_SIZE) return oldBox;
+                  const minSize = singleObj?.type === 'frame' ? 100 : singleObj?.type === 'line' ? 0 : MIN_OBJECT_SIZE;
+                  if (newBox.width < minSize || newBox.height < minSize) return oldBox;
                   return newBox;
                 }}
                 onTransformStart={() => {
@@ -1454,11 +1440,12 @@ export function Canvas({
                         if (!Number.isFinite(h) || h <= 0) h = obj.height;
                         const sx = node.scaleX?.() ?? 1;
                         const sy = node.scaleY?.() ?? 1;
+                        const minSize = obj.type === 'line' ? 0 : MIN_OBJECT_SIZE;
                         const data = {
                           x: n(node.x(), obj.x),
                           y: n(node.y(), obj.y),
-                          width: Math.max(MIN_OBJECT_SIZE, w * sx),
-                          height: Math.max(MIN_OBJECT_SIZE, h * sy),
+                          width: Math.max(minSize, w * sx),
+                          height: Math.max(minSize, h * sy),
                           rotation: n(node.rotation?.() ?? 0, obj.rotation ?? 0),
                         };
                         map.set(id, data);
@@ -1546,10 +1533,44 @@ export function Canvas({
                     requestAnimationFrame(() => {
                       transformFlushScheduledRef.current = false;
                       const current = liveTransformRef.current;
-                      if (current && transformingObjectIdRef.current) {
+                      const shapeId = transformingObjectIdRef.current;
+                      if (current && shapeId) {
                         setLiveTransform({ ...current });
                         onLiveTransformChange?.(current);
-                        onBroadcastTransform?.(transformingObjectIdRef.current, current.x, current.y, current.width, current.height, current.rotation);
+                        onBroadcastTransform?.(shapeId, current.x, current.y, current.width, current.height, current.rotation);
+                        // Keep connected lines in sync during transform (no lag)
+                        const currentObjects = objectsRef.current;
+                        const shape = currentObjects.find((o) => o.id === shapeId);
+                        if (shape && shape.type !== 'line') {
+                          const virtualShape: BoardObject = { ...shape, ...current };
+                          const connectedLines = currentObjects.filter(
+                            (o) => o.type === 'line' && (o.fromId === shapeId || o.toId === shapeId),
+                          );
+                          if (connectedLines.length > 0) {
+                            const overrides: Record<string, LineOverride> = {};
+                            for (const line of connectedLines) {
+                              const fromShape = line.fromId === shapeId ? virtualShape : currentObjects.find((o) => o.id === line.fromId);
+                              const toShape = line.toId === shapeId ? virtualShape : currentObjects.find((o) => o.id === line.toId);
+                              let startPt = { x: line.x, y: line.y };
+                              let endPt = { x: line.x + line.width, y: line.y + line.height };
+                              if (line.fromId && line.fromPoint && fromShape) {
+                                const cp = getConnectionPointById(fromShape, line.fromPoint);
+                                if (cp) startPt = cp;
+                              }
+                              if (line.toId && line.toPoint && toShape) {
+                                const cp = getConnectionPointById(toShape, line.toPoint);
+                                if (cp) endPt = cp;
+                              }
+                              const oldStart = { x: line.x, y: line.y };
+                              const oldEnd = { x: line.x + line.width, y: line.y + line.height };
+                              const waypoints = (line.waypoints?.length ?? 0) > 0
+                                ? preserveWaypointBend(line.waypoints!, oldStart, oldEnd, startPt, endPt)
+                                : [];
+                              overrides[line.id] = { x: startPt.x, y: startPt.y, width: endPt.x - startPt.x, height: endPt.y - startPt.y, waypoints };
+                            }
+                            setLineOverrides((prev) => ({ ...prev, ...overrides }));
+                          }
+                        }
                       }
                     });
                   }
@@ -1582,24 +1603,40 @@ export function Canvas({
                     const scaleY = node.scaleY();
                     node.scaleX(1);
                     node.scaleY(1);
-                    const rawW = Math.max(MIN_OBJECT_SIZE, obj.width * scaleX);
-                    const rawH = Math.max(MIN_OBJECT_SIZE, obj.height * scaleY);
                     const rawX = node.x();
                     const rawY = node.y();
                     const rawRot = node.rotation();
-                    const fallback = { x: obj.x, y: obj.y, width: obj.width, height: obj.height, rotation: obj.rotation ?? 0 };
-                    const { x: newX, y: newY, width: newWidth, height: newHeight, rotation: newRot } = sanitizeTransform(
-                      rawX,
-                      rawY,
-                      rawW,
-                      rawH,
-                      rawRot,
-                      fallback,
-                    );
+                    let newX: number;
+                    let newY: number;
+                    let newWidth: number;
+                    let newHeight: number;
+                    let newRot: number;
+                    if (obj.type === 'line') {
+                      const n = (v: number, d: number) => (Number.isFinite(v) ? v : d);
+                      newX = n(rawX, obj.x);
+                      newY = n(rawY, obj.y);
+                      newWidth = Math.max(0, n(obj.width * scaleX, obj.width));
+                      newHeight = Math.max(0, n(obj.height * scaleY, obj.height));
+                      newRot = n(rawRot, obj.rotation ?? 0);
+                    } else {
+                      const rawW = Math.max(MIN_OBJECT_SIZE, obj.width * scaleX);
+                      const rawH = Math.max(MIN_OBJECT_SIZE, obj.height * scaleY);
+                      const fallback = { x: obj.x, y: obj.y, width: obj.width, height: obj.height, rotation: obj.rotation ?? 0 };
+                      const out = sanitizeTransform(rawX, rawY, rawW, rawH, rawRot, fallback);
+                      newX = out.x;
+                      newY = out.y;
+                      newWidth = out.width;
+                      newHeight = out.height;
+                      newRot = out.rotation;
+                    }
                     onObjectUpdate(obj.id, { x: newX, y: newY, width: newWidth, height: newHeight, rotation: newRot });
-                    updateConnectedLines(obj.id, newX, newY, newWidth, newHeight, newRot);
+                    if (obj.type !== 'line') {
+                      updateConnectedLines(obj.id, newX, newY, newWidth, newHeight, newRot);
+                    }
+                    setLineOverrides({});
                   } else {
                     const changes: { id: string; updates: Partial<BoardObject> }[] = [];
+                    const n = (v: number, d: number) => (Number.isFinite(v) ? v : d);
                     nodes.forEach((node: Konva.Node) => {
                       const id = node.id();
                       const obj = currentObjects.find((o) => o.id === id);
@@ -1608,21 +1645,29 @@ export function Canvas({
                       const scaleY = node.scaleY();
                       node.scaleX(1);
                       node.scaleY(1);
-                      const rawW = Math.max(MIN_OBJECT_SIZE, obj.width * scaleX);
-                      const rawH = Math.max(MIN_OBJECT_SIZE, obj.height * scaleY);
-                      const fallback = { x: obj.x, y: obj.y, width: obj.width, height: obj.height, rotation: obj.rotation ?? 0 };
-                      const { x, y, width, height, rotation } = sanitizeTransform(
-                        node.x(),
-                        node.y(),
-                        rawW,
-                        rawH,
-                        node.rotation(),
-                        fallback,
-                      );
-                      changes.push({
-                        id,
-                        updates: { x, y, width, height, rotation },
-                      });
+                      const rx = node.x();
+                      const ry = node.y();
+                      const rrot = node.rotation();
+                      if (obj.type === 'line') {
+                        const rawW = Math.max(0, n(obj.width * scaleX, obj.width));
+                        const rawH = Math.max(0, n(obj.height * scaleY, obj.height));
+                        changes.push({
+                          id,
+                          updates: {
+                            x: n(rx, obj.x),
+                            y: n(ry, obj.y),
+                            width: rawW,
+                            height: rawH,
+                            rotation: n(rrot, obj.rotation ?? 0),
+                          },
+                        });
+                      } else {
+                        const rawW = Math.max(MIN_OBJECT_SIZE, obj.width * scaleX);
+                        const rawH = Math.max(MIN_OBJECT_SIZE, obj.height * scaleY);
+                        const fallback = { x: obj.x, y: obj.y, width: obj.width, height: obj.height, rotation: obj.rotation ?? 0 };
+                        const { x, y, width, height, rotation } = sanitizeTransform(rx, ry, rawW, rawH, rrot, fallback);
+                        changes.push({ id, updates: { x, y, width, height, rotation } });
+                      }
                     });
                     const shapeUpdates = changes.map((c) => ({
                       id: c.id,
