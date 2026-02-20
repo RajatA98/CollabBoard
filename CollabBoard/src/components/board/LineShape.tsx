@@ -104,6 +104,7 @@ export function LineShape({ object, isSelected, onSelect, onUpdate, onDoubleClic
       id={object.id}
       x={object.x}
       y={object.y}
+      rotation={object.rotation ?? 0}
       draggable={!isConnected}
       onClick={handleClick}
       onTap={() => onSelect(false)}

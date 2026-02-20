@@ -18,7 +18,7 @@ function directionFromAngle(angleDeg: number): Direction {
 
 /** Rotate point (px, py) around (cx, cy) by angleDeg degrees. */
 function rotatePoint(px: number, py: number, cx: number, cy: number, angleDeg: number): { x: number; y: number } {
-  if (angleDeg === 0) return { x: px, y: py };
+  if (angleDeg === 0 || !Number.isFinite(angleDeg)) return { x: px, y: py };
   const rad = (angleDeg * Math.PI) / 180;
   const cos = Math.cos(rad);
   const sin = Math.sin(rad);

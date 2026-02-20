@@ -14,7 +14,7 @@ export const TEXT_ELEMENT_FONT_SIZE = 16;
 export const TEXT_ELEMENT_FONT_FAMILY = "'Segoe UI', system-ui, sans-serif";
 
 // Sticky note layout constants
-export const STICKY_TEXT_OFFSET_Y = 26;
+export const STICKY_TEXT_OFFSET_Y = 8;
 export const STICKY_TEXT_PADDING_BOTTOM = 8;
 export const STICKY_MIN_HEIGHT = 60;
 export const STICKY_FONT_SIZE = 16;
@@ -33,9 +33,11 @@ export function measureTextHeight(options: TextMeasureOptions): number {
     fontFamily = TEXT_ELEMENT_FONT_FAMILY,
   } = options;
 
+  // Guard: invalid width (e.g. NaN from rotation transform) can make Konva.Text misbehave or return NaN
+  const safeWidth = Number.isFinite(width) && width > 0 ? width : 100;
   const tempText = new Konva.Text({
     text: text || ' ',
-    width,
+    width: safeWidth,
     fontSize,
     fontFamily,
     wrap: 'word',
@@ -43,5 +45,5 @@ export function measureTextHeight(options: TextMeasureOptions): number {
 
   const measuredHeight = tempText.height();
   tempText.destroy();
-  return measuredHeight;
+  return Number.isFinite(measuredHeight) ? measuredHeight : 20;
 }

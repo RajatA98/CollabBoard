@@ -5,7 +5,7 @@ import type { BoardObject, LiveEditingData } from '../../../types';
 
 vi.mock('../../../utils/textMeasure', () => ({
   measureTextHeight: () => 20,
-  STICKY_TEXT_OFFSET_Y: 26,
+  STICKY_TEXT_OFFSET_Y: 8,
   STICKY_TEXT_PADDING_BOTTOM: 8,
   STICKY_MIN_HEIGHT: 60,
   STICKY_FONT_SIZE: 16,

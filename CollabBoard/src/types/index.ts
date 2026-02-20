@@ -5,7 +5,7 @@ export interface Waypoint {
 
 export interface BoardObject {
   id: string;
-  type: 'sticky' | 'rectangle' | 'circle' | 'line' | 'text' | 'triangle' | 'star';
+  type: 'sticky' | 'rectangle' | 'circle' | 'line' | 'text' | 'triangle' | 'star' | 'frame';
   x: number;
   y: number;
   width: number;
@@ -35,6 +35,10 @@ export interface BoardObject {
   fromPoint?: string;
   toId?: string;
   toPoint?: string;
+  // Frame grouping: if set, this object is "inside" the frame and moves/resizes/rotates with it
+  frameId?: string;
+  // Original width/height ratio for aspect-ratio preservation on resize
+  aspectRatio?: number;
 }
 
 export interface CursorData {
