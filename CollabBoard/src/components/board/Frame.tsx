@@ -52,7 +52,8 @@ export function Frame({ object, isSelected, onSelect, onUpdate, onDoubleClick, o
   };
 
   const title = object.text || 'Frame';
-  const borderColor = isSelected ? FRAME_BORDER_COLOR_SELECTED : FRAME_BORDER_COLOR;
+  const borderColor = object.strokeColor ?? (isSelected ? FRAME_BORDER_COLOR_SELECTED : FRAME_BORDER_COLOR);
+  const borderWidth = object.strokeWidth ?? 2;
 
   return (
     <Group
@@ -85,7 +86,7 @@ export function Frame({ object, isSelected, onSelect, onUpdate, onDoubleClick, o
         width={object.width}
         height={object.height}
         stroke={borderColor}
-        strokeWidth={2}
+        strokeWidth={borderWidth}
         cornerRadius={0}
       />
       {/* Title background - positioned above frame top edge */}

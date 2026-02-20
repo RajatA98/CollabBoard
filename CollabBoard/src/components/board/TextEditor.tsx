@@ -107,7 +107,7 @@ export function TextEditor({ x, y, width, height, text, color = '#FFD54F', textC
       }}
       onBlur={handleBlur}
       onKeyDown={handleKeyDown}
-      placeholder={isFrameType ? 'Frame title...' : isTextType ? 'Type here...' : 'Type your note...'}
+      placeholder={isFrameType ? 'Frame title...' : isTextType ? 'Type text...' : 'Type your note...'}
     />
   );
 }

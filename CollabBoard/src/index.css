@@ -1115,6 +1115,70 @@ html, body, #root {
   background: rgba(255, 255, 255, 0.1);
 }
 
+/* Delete frame confirmation modal */
+.delete-frame-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+.delete-frame-confirm-box {
+  background: #fff;
+  color: #333;
+  padding: 20px 24px;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  min-width: 320px;
+}
+.delete-frame-confirm-title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.delete-frame-confirm-desc {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: #666;
+}
+.delete-frame-confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.delete-frame-confirm-btn {
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.delete-frame-confirm-delete-all {
+  background: #e53935;
+  color: #fff;
+}
+.delete-frame-confirm-delete-all:hover {
+  background: #c62828;
+}
+.delete-frame-confirm-keep {
+  background: #f5f5f5;
+  color: #333;
+  border-color: #ccc;
+}
+.delete-frame-confirm-keep:hover {
+  background: #eee;
+}
+.delete-frame-confirm-cancel {
+  background: transparent;
+  color: #666;
+  border-color: #ccc;
+}
+.delete-frame-confirm-cancel:hover {
+  background: #f5f5f5;
+}
+
 .sb-line-preview {
   font-family: monospace;
   letter-spacing: -1px;

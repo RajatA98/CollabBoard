@@ -90,6 +90,43 @@ const ZOOM_SPEED = 1.05;
 /** Minimum size so sticky notes and shapes stay usable and don't collapse. */
 const MIN_OBJECT_SIZE = 60;
 
+/** Coerce numeric fields to finite so Konva and connection points never receive NaN. */
+function coerceDisplayObject<T extends { x: number; y: number; width: number; height: number; rotation?: number }>(
+  display: T,
+  fallback: { x: number; y: number; width: number; height: number; rotation?: number },
+): T {
+  const n = (v: number, d: number) => (Number.isFinite(v) ? v : d);
+  const r = display.rotation ?? fallback.rotation ?? 0;
+  return {
+    ...display,
+    x: n(display.x, fallback.x),
+    y: n(display.y, fallback.y),
+    width: Math.max(MIN_OBJECT_SIZE, n(display.width, fallback.width)),
+    height: Math.max(MIN_OBJECT_SIZE, n(display.height, fallback.height)),
+    rotation: n(r, fallback.rotation ?? 0),
+  } as T;
+}
+
+/** Ensure transform values are finite numbers (no NaN/Infinity) to avoid white screen / Konva errors. */
+function sanitizeTransform(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  rotation: number,
+  fallback: { x: number; y: number; width: number; height: number; rotation: number },
+): { x: number; y: number; width: number; height: number; rotation: number } {
+  const n = (v: number, def: number) => (Number.isFinite(v) ? v : def);
+  const r = n(rotation, fallback.rotation);
+  return {
+    x: n(x, fallback.x),
+    y: n(y, fallback.y),
+    width: Math.max(MIN_OBJECT_SIZE, n(width, fallback.width)),
+    height: Math.max(MIN_OBJECT_SIZE, n(height, fallback.height)),
+    rotation: Math.max(-360, Math.min(360, r)),
+  };
+}
+
 /**
  * Preserve waypoint bend when start/end move: express waypoints relative to the
  * start-end segment, then reconstruct with new start/end so the path shape stays constant.
@@ -250,6 +287,11 @@ export function Canvas({
 
   /** When multi-select: current visual position/size/rotation of each selected node (for ConnectionPoints and line overrides). */
   const multiSelectDisplayRef = useRef<Map<string, { x: number; y: number; width: number; height: number; rotation: number }>>(new Map());
+  /** Latest objects for use inside Transformer callbacks (avoids stale closure). */
+  const objectsRef = useRef<BoardObject[]>(objects);
+  useEffect(() => {
+    objectsRef.current = objects;
+  }, [objects]);
   /** When dragging multi-select via marquee rect: rect start position. */
   const multiSelectDragStartRef = useRef<{ x: number; y: number } | null>(null);
 
@@ -337,7 +379,6 @@ export function Canvas({
         };
         return;
       }
-      // Allow marquee when clicking on empty area: Stage or Layer (Konva often hits Layer, not Stage)
       const stage = e.target.getStage();
       const target = e.target;
       const isStage = target === stage;
@@ -346,6 +387,7 @@ export function Canvas({
       if (e.evt.button !== 0) return;
       const worldPos = getWorldPointer();
       if (!worldPos) return;
+
       marqueeStartRef.current = worldPos;
       marqueeEndRef.current = worldPos;
       setIsMarqueeSelecting(true);
@@ -817,19 +859,28 @@ export function Canvas({
       transformer.nodes(nodes);
       if (nodes.length > 1) {
         const map = new Map<string, { x: number; y: number; width: number; height: number; rotation: number }>();
+        const n = (v: number, def: number) => (Number.isFinite(v) ? v : def);
         nodes.forEach((node: Konva.Node) => {
           const id = node.id?.();
-          if (id) {
-            const w = node.width();
-            const h = node.height();
-            map.set(id, {
-              x: node.x(),
-              y: node.y(),
-              width: w * (node.scaleX?.() ?? 1),
-              height: h * (node.scaleY?.() ?? 1),
-              rotation: node.rotation?.() ?? 0,
-            });
-          }
+          if (!id) return;
+          const obj = objects.find(o => o.id === id);
+          const defW = obj && Number.isFinite(obj.width) && obj.width > 0 ? obj.width : 100;
+          const defH = obj && Number.isFinite(obj.height) && obj.height > 0 ? obj.height : 100;
+          let w = node.width();
+          let h = node.height();
+          if (!Number.isFinite(w) || w <= 0) w = defW;
+          if (!Number.isFinite(h) || h <= 0) h = defH;
+          const sx = node.scaleX?.() ?? 1;
+          const sy = node.scaleY?.() ?? 1;
+          const rw = Math.max(MIN_OBJECT_SIZE, w * sx);
+          const rh = Math.max(MIN_OBJECT_SIZE, h * sy);
+          map.set(id, {
+            x: n(node.x(), obj?.x ?? 0),
+            y: n(node.y(), obj?.y ?? 0),
+            width: rw,
+            height: rh,
+            rotation: n(node.rotation?.() ?? 0, obj?.rotation ?? 0),
+          });
         });
         multiSelectDisplayRef.current = map;
       } else {
@@ -1275,12 +1326,13 @@ export function Canvas({
             .map((obj) => {
               const remoteXform = remoteTransformByObjectId[obj.id];
               const remoteEdit = remoteEditingByObjectId[obj.id];
-              const displayObject =
+              const rawDisplay =
                 liveTransform != null
                   ? { ...obj, x: liveTransform.x, y: liveTransform.y, rotation: liveTransform.rotation, width: liveTransform.width, height: liveTransform.height }
                   : remoteXform != null
                     ? { ...obj, x: remoteXform.x, y: remoteXform.y, width: remoteXform.width, height: remoteXform.height, rotation: remoteXform.rotation }
                     : (lineOverrides[obj.id] && obj.type === 'line' ? { ...obj, ...lineOverrides[obj.id] } : obj);
+              const displayObject = coerceDisplayObject(rawDisplay, obj);
               const updateHandler = (updates: Partial<BoardObject>) => {
                 if (updates.x !== undefined && updates.y !== undefined && selectedObjectIds.length > 1) {
                   handleObjectDragEnd(obj.id, updates.x, updates.y);
@@ -1325,8 +1377,8 @@ export function Canvas({
               </React.Fragment>
               );
             })}
-        {/* Single Transformer for one or many selected; multi = keep aspect ratio + rotate all */}
-        {selectedObjectIds.length >= 1 && (() => {
+        {/* Transformer is always rendered (never conditionally unmounted) to avoid Konva state issues when selection changes during blur/click transitions */}
+        {(() => {
           const singleObj = selectedObjectIds.length === 1 ? objects.find((o) => o.id === selectedObjectIds[0]) : null;
           return (
             <>
@@ -1356,6 +1408,10 @@ export function Canvas({
                 rotateAnchorAngle={
                   singleObj
                     ? (() => {
+                        // Frames: use top-right (45°) like shapes so the rotate icon placement matches
+                        if (singleObj.type === 'frame') {
+                          return 45;
+                        }
                         const w = liveTransform?.width ?? singleObj.width;
                         const h = liveTransform?.height ?? singleObj.height;
                         return (Math.atan2(w, h) * 180) / Math.PI;
@@ -1364,8 +1420,7 @@ export function Canvas({
                 }
                 rotateAnchorOffset={24}
                 boundBoxFunc={(oldBox, newBox) => {
-                  const minSize = singleObj?.type === 'frame' ? 100 : MIN_OBJECT_SIZE;
-                  if (newBox.width < minSize || newBox.height < minSize) return oldBox;
+                  if (newBox.width < MIN_OBJECT_SIZE || newBox.height < MIN_OBJECT_SIZE) return oldBox;
                   return newBox;
                 }}
                 onTransformStart={() => {
@@ -1379,35 +1434,40 @@ export function Canvas({
                   }
                 }}
                 onTransform={(e) => {
-                  const transformer = transformerRef.current;
-                  const nodes = transformer?.nodes() ?? [];
-                  if (selectedObjectIds.length > 1 && nodes.length > 1) {
-                    const selectedSet = new Set(selectedObjectIds);
-                    const map = new Map<string, { x: number; y: number; width: number; height: number; rotation: number }>();
-                    const virtualById = new Map<string, BoardObject>();
-                    nodes.forEach((node: Konva.Node) => {
-                      const id = node.id?.();
-                      if (!id) return;
-                      const obj = objects.find((o) => o.id === id);
-                      if (!obj) return;
-                      const w = node.width();
-                      const h = node.height();
-                      const sx = node.scaleX?.() ?? 1;
-                      const sy = node.scaleY?.() ?? 1;
-                      const data = {
-                        x: node.x(),
-                        y: node.y(),
-                        width: Math.max(MIN_OBJECT_SIZE, w * sx),
-                        height: Math.max(MIN_OBJECT_SIZE, h * sy),
-                        rotation: node.rotation?.() ?? 0,
-                      };
-                      map.set(id, data);
-                      virtualById.set(id, { ...obj, ...data });
-                    });
+                  try {
+                    const transformer = transformerRef.current;
+                    const nodes = transformer?.nodes() ?? [];
+                    const currentObjects = objectsRef.current;
+                    if (selectedObjectIds.length > 1 && nodes.length > 1) {
+                      const selectedSet = new Set(selectedObjectIds);
+                      const map = new Map<string, { x: number; y: number; width: number; height: number; rotation: number }>();
+                      const virtualById = new Map<string, BoardObject>();
+                      const n = (v: number, def: number) => (Number.isFinite(v) ? v : def);
+                      nodes.forEach((node: Konva.Node) => {
+                        const id = node.id?.();
+                        if (!id) return;
+                        const obj = currentObjects.find((o) => o.id === id);
+                        if (!obj) return;
+                        let w = node.width();
+                        let h = node.height();
+                        if (!Number.isFinite(w) || w <= 0) w = obj.width;
+                        if (!Number.isFinite(h) || h <= 0) h = obj.height;
+                        const sx = node.scaleX?.() ?? 1;
+                        const sy = node.scaleY?.() ?? 1;
+                        const data = {
+                          x: n(node.x(), obj.x),
+                          y: n(node.y(), obj.y),
+                          width: Math.max(MIN_OBJECT_SIZE, w * sx),
+                          height: Math.max(MIN_OBJECT_SIZE, h * sy),
+                          rotation: n(node.rotation?.() ?? 0, obj.rotation ?? 0),
+                        };
+                        map.set(id, data);
+                        virtualById.set(id, { ...obj, ...data });
+                      });
                     multiSelectDisplayRef.current = map;
                     const getVirtual = (id: string): BoardObject | undefined =>
-                      virtualById.get(id) ?? objects.find((o) => o.id === id);
-                    const connectedLines = objects.filter(
+                      virtualById.get(id) ?? currentObjects.find((o) => o.id === id);
+                    const connectedLines = currentObjects.filter(
                       (o) =>
                         o.type === 'line' &&
                         ((o.fromId != null && selectedSet.has(o.fromId)) || (o.toId != null && selectedSet.has(o.toId))),
@@ -1449,6 +1509,13 @@ export function Canvas({
                   }
                   if (selectedObjectIds.length !== 1) return;
                   const node = e.target;
+                  const id = node.id?.();
+                  const obj = id ? currentObjects.find((o) => o.id === id) : null;
+                  if (!obj) {
+                    liveTransformRef.current = null;
+                    onLiveTransformChange?.(null);
+                    return;
+                  }
                   const currentRotation = node.rotation();
                   if (Math.abs(currentRotation - lastRotationRef.current) > 0.1) {
                     isRotatingGestureRef.current = true;
@@ -1456,15 +1523,23 @@ export function Canvas({
                   lastRotationRef.current = currentRotation;
                   const scaleX = node.scaleX();
                   const scaleY = node.scaleY();
-                  const baseW = singleObj!.width;
-                  const baseH = singleObj!.height;
-                  const liveValues = {
-                    x: node.x(),
-                    y: node.y(),
-                    width: Math.max(MIN_OBJECT_SIZE, baseW * scaleX),
-                    height: Math.max(MIN_OBJECT_SIZE, baseH * scaleY),
-                    rotation: currentRotation,
+                  const baseW = Number.isFinite(obj.width) && obj.width > 0 ? obj.width : 100;
+                  const baseH = Number.isFinite(obj.height) && obj.height > 0 ? obj.height : 100;
+                  const fallback = {
+                    x: obj.x,
+                    y: obj.y,
+                    width: baseW,
+                    height: baseH,
+                    rotation: obj.rotation ?? 0,
                   };
+                  const liveValues = sanitizeTransform(
+                    node.x(),
+                    node.y(),
+                    Math.max(MIN_OBJECT_SIZE, baseW * scaleX),
+                    Math.max(MIN_OBJECT_SIZE, baseH * scaleY),
+                    currentRotation,
+                    fallback,
+                  );
                   liveTransformRef.current = liveValues;
                   if (!transformFlushScheduledRef.current) {
                     transformFlushScheduledRef.current = true;
@@ -1478,46 +1553,75 @@ export function Canvas({
                       }
                     });
                   }
+                  } catch (err) {
+                    console.error('Canvas onTransform error:', err);
+                    liveTransformRef.current = null;
+                    onLiveTransformChange?.(null);
+                  }
                 }}
                 onTransformEnd={() => {
-                  const transformer = transformerRef.current;
-                  const nodes = transformer?.nodes() ?? [];
-                  if (nodes.length === 0) return;
+                  try {
+                    const transformer = transformerRef.current;
+                    const nodes = transformer?.nodes() ?? [];
+                    const currentObjects = objectsRef.current;
+                    if (nodes.length === 0) return;
 
-                  if (nodes.length === 1) {
-                    const node = nodes[0];
-                    const obj = objects.find((o) => o.id === node.id());
-                    if (!obj) return;
+                    if (nodes.length === 1) {
+                      const node = nodes[0];
+                      const obj = currentObjects.find((o) => o.id === node.id());
+                      if (!obj) {
+                        isTransformingRef.current = false;
+                        transformingObjectIdRef.current = null;
+                        liveTransformRef.current = null;
+                        setLiveTransform(null);
+                        onLiveTransformChange?.(null);
+                        onClearTransform?.();
+                        return;
+                      }
                     const scaleX = node.scaleX();
                     const scaleY = node.scaleY();
                     node.scaleX(1);
                     node.scaleY(1);
-                    const newWidth = Math.max(MIN_OBJECT_SIZE, obj.width * scaleX);
-                    const newHeight = Math.max(MIN_OBJECT_SIZE, obj.height * scaleY);
-                    const newX = node.x(), newY = node.y(), newRot = node.rotation();
+                    const rawW = Math.max(MIN_OBJECT_SIZE, obj.width * scaleX);
+                    const rawH = Math.max(MIN_OBJECT_SIZE, obj.height * scaleY);
+                    const rawX = node.x();
+                    const rawY = node.y();
+                    const rawRot = node.rotation();
+                    const fallback = { x: obj.x, y: obj.y, width: obj.width, height: obj.height, rotation: obj.rotation ?? 0 };
+                    const { x: newX, y: newY, width: newWidth, height: newHeight, rotation: newRot } = sanitizeTransform(
+                      rawX,
+                      rawY,
+                      rawW,
+                      rawH,
+                      rawRot,
+                      fallback,
+                    );
                     onObjectUpdate(obj.id, { x: newX, y: newY, width: newWidth, height: newHeight, rotation: newRot });
                     updateConnectedLines(obj.id, newX, newY, newWidth, newHeight, newRot);
                   } else {
                     const changes: { id: string; updates: Partial<BoardObject> }[] = [];
                     nodes.forEach((node: Konva.Node) => {
                       const id = node.id();
-                      const obj = objects.find((o) => o.id === id);
+                      const obj = currentObjects.find((o) => o.id === id);
                       if (!obj) return;
                       const scaleX = node.scaleX();
                       const scaleY = node.scaleY();
                       node.scaleX(1);
                       node.scaleY(1);
-                      const newWidth = Math.max(MIN_OBJECT_SIZE, obj.width * scaleX);
-                      const newHeight = Math.max(MIN_OBJECT_SIZE, obj.height * scaleY);
+                      const rawW = Math.max(MIN_OBJECT_SIZE, obj.width * scaleX);
+                      const rawH = Math.max(MIN_OBJECT_SIZE, obj.height * scaleY);
+                      const fallback = { x: obj.x, y: obj.y, width: obj.width, height: obj.height, rotation: obj.rotation ?? 0 };
+                      const { x, y, width, height, rotation } = sanitizeTransform(
+                        node.x(),
+                        node.y(),
+                        rawW,
+                        rawH,
+                        node.rotation(),
+                        fallback,
+                      );
                       changes.push({
                         id,
-                        updates: {
-                          x: node.x(),
-                          y: node.y(),
-                          width: newWidth,
-                          height: newHeight,
-                          rotation: node.rotation(),
-                        },
+                        updates: { x, y, width, height, rotation },
                       });
                     });
                     const shapeUpdates = changes.map((c) => ({
@@ -1528,21 +1632,31 @@ export function Canvas({
                       height: c.updates.height!,
                       rotation: c.updates.rotation!,
                     }));
-                    const lineUpdates = computeConnectedLineUpdates(shapeUpdates, objects);
+                    const lineUpdates = computeConnectedLineUpdates(shapeUpdates, currentObjects);
                     changes.push(...lineUpdates);
                     if (changes.length > 0 && onBatchObjectUpdate) onBatchObjectUpdate(changes);
                     setLineOverrides({});
                     multiSelectDisplayRef.current.clear();
                   }
 
-                  isTransformingRef.current = false;
-                  transformingObjectIdRef.current = null;
-                  liveTransformRef.current = null;
-                  setLiveTransform(null);
-                  onLiveTransformChange?.(null);
-                  isRotatingGestureRef.current = false;
-                  if (nodes.length === 1) lastRotationRef.current = nodes[0].rotation();
-                  onClearTransform?.();
+                    isTransformingRef.current = false;
+                    transformingObjectIdRef.current = null;
+                    liveTransformRef.current = null;
+                    setLiveTransform(null);
+                    onLiveTransformChange?.(null);
+                    isRotatingGestureRef.current = false;
+                    if (nodes.length === 1) lastRotationRef.current = nodes[0].rotation();
+                    onClearTransform?.();
+                  } catch (err) {
+                    console.error('Canvas onTransformEnd error:', err);
+                    isTransformingRef.current = false;
+                    transformingObjectIdRef.current = null;
+                    liveTransformRef.current = null;
+                    setLiveTransform(null);
+                    onLiveTransformChange?.(null);
+                    isRotatingGestureRef.current = false;
+                    onClearTransform?.();
+                  }
                 }}
                 rotateAnchorCursor="grab"
                 anchorStyleFunc={(anchor) => {
@@ -1629,7 +1743,7 @@ export function Canvas({
           if (!showXs) return null;
           const isSelected = selectedObjectIds.includes(o.id);
           const remoteXform = remoteTransformByObjectId[o.id];
-          const displayObject =
+          const rawDisplay =
             isSelected && selectedObjectIds.length === 1 && liveTransform != null
               ? { ...o, ...liveTransform }
               : isSelected && selectedObjectIds.length > 1
@@ -1640,6 +1754,7 @@ export function Canvas({
                 : remoteXform != null
                   ? { ...o, x: remoteXform.x, y: remoteXform.y, width: remoteXform.width, height: remoteXform.height, rotation: remoteXform.rotation }
                   : o;
+          const displayObject = coerceDisplayObject(rawDisplay, o);
           return (
             <ConnectionPoints
               key={`cp-${o.id}`}

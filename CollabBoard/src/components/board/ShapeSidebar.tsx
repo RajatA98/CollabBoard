@@ -238,6 +238,20 @@ export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({
           aria-label="Text"
         />
 
+        {/* Frame – separate button (not in shapes panel) */}
+        <TooltipButton
+          label="Frame"
+          shortcut="F"
+          icon={<FramePanelIcon />}
+          onClick={() => handleClick('frame')}
+          draggable
+          onDragStart={(e) => handleDragStart('frame', e)}
+          onDragEnd={handleDragEnd}
+          data-testid="shape-template-frame"
+          data-shape-type="frame"
+          aria-label="Frame"
+        />
+
         {/* Shapes – toggles panel, not draggable */}
         <TooltipButton
           label="Shapes and lines"
@@ -355,21 +369,6 @@ export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({
           >
             <span className="shape-panel-icon">
               <ArrowDoublePanelIcon />
-            </span>
-          </div>
-          <div
-            className="shape-panel-item"
-            data-testid="shape-template-frame"
-            data-shape-type="frame"
-            draggable
-            onClick={() => handleClick('frame')}
-            onDragStart={(e) => handleDragStart('frame', e)}
-            onDragEnd={handleDragEnd}
-            role="button"
-            aria-label="Frame"
-          >
-            <span className="shape-panel-icon">
-              <FramePanelIcon />
             </span>
           </div>
         </div>

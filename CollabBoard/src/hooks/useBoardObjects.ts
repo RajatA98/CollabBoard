@@ -4,12 +4,51 @@ import { db } from '../firebase/config';
 import {
   addObject as fbAddObject,
   updateObject as fbUpdateObject,
+  updateObjectsBatch as fbUpdateObjectsBatch,
   deleteObject as fbDeleteObject,
   clearObjects as fbClearObjects,
 } from '../firebase/firestore';
 import type { BoardObject } from '../types';
 
 const BOARD_OBJECT_TYPES: BoardObject['type'][] = ['sticky', 'rectangle', 'circle', 'line', 'text', 'triangle', 'star', 'frame'];
+
+const MIN_SIZE = 20;
+const MAX_ROTATION = 360;
+
+/** Sanitize partial updates so we never merge or write NaN/Infinity (fixes white screen from bad rotation/transform). */
+function sanitizeUpdates(updates: Partial<BoardObject>, existing?: BoardObject): Partial<BoardObject> {
+  const out: Partial<BoardObject> = {};
+  const num = (v: unknown, fallback: number) =>
+    typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+  for (const [key, value] of Object.entries(updates)) {
+    if (value === undefined) {
+      (out as Record<string, unknown>)[key] = undefined;
+      continue;
+    }
+    const fallback = existing ? (existing as unknown as Record<string, unknown>)[key] : undefined;
+    const def = typeof fallback === 'number' && Number.isFinite(fallback) ? fallback : 0;
+    if (key === 'x' || key === 'y') {
+      (out as Record<string, number>)[key] = num(value, def);
+    } else if (key === 'width' || key === 'height') {
+      const v = num(value, key === 'width' ? 100 : 100);
+      (out as Record<string, number>)[key] = Math.max(MIN_SIZE, v);
+    } else if (key === 'rotation') {
+      const v = num(value, def);
+      (out as Record<string, number>)[key] = Math.max(-MAX_ROTATION, Math.min(MAX_ROTATION, v));
+    } else if (key === 'fontSize' || key === 'strokeWidth' || key === 'aspectRatio' || key === 'createdAt' || key === 'updatedAt') {
+      const v = num(value, def);
+      if (Number.isFinite(v)) (out as Record<string, number>)[key] = v;
+    } else if (key === 'waypoints' && Array.isArray(value)) {
+      (out as Record<string, unknown>)[key] = value.map((w: { x?: number; y?: number }) => ({
+        x: num(w.x, 0),
+        y: num(w.y, 0),
+      }));
+    } else {
+      (out as Record<string, unknown>)[key] = value;
+    }
+  }
+  return out;
+}
 
 /** Ensure object has required numeric/string fields so connection points and shapes never get undefined/NaN from Firestore. */
 function normalizeBoardObject(raw: Record<string, unknown>, id: string): BoardObject {
@@ -49,6 +88,8 @@ function normalizeBoardObject(raw: Record<string, unknown>, id: string): BoardOb
     lineStyle: raw.lineStyle != null && ['solid', 'dashed', 'dotted'].includes(String(raw.lineStyle))
       ? (raw.lineStyle as BoardObject['lineStyle'])
       : undefined,
+    frameId: raw.frameId != null ? str(raw.frameId, '') : undefined,
+    aspectRatio: raw.aspectRatio != null ? num(raw.aspectRatio, 1) : undefined,
   };
 }
 
@@ -58,18 +99,13 @@ export function useBoardObjects(boardId: string) {
   const draggingIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    console.log('📡 Setting up Firestore listener for board:', boardId);
     const colRef = collection(db, 'boards', boardId, 'objects');
     const unsubscribe = onSnapshot(colRef, (snapshot) => {
       const docs = snapshot.docs.map((doc) =>
         normalizeBoardObject({ ...doc.data(), id: doc.id }, doc.id)
       );
-      console.log('🔄 Firestore snapshot received:', { count: docs.length, docs });
       setObjects(prev => {
-        // Fast path: nothing is being dragged
         if (draggingIdsRef.current.size === 0) return docs;
-        // Preserve local state for any object that is mid-drag so Konva nodes
-        // don't snap back to stale Firestore coordinates during the gesture.
         return docs.map(doc =>
           draggingIdsRef.current.has(doc.id)
             ? (prev.find(o => o.id === doc.id) ?? doc)
@@ -103,14 +139,35 @@ export function useBoardObjects(boardId: string) {
   );
 
   const updateObject = useCallback(
-    async (objectId: string, updates: Partial<BoardObject>) => {
-      // Optimistic update so undo/redo and other updates reflect immediately in the UI
+    (objectId: string, updates: Partial<BoardObject>) => {
+      const existing = objects.find((o) => o.id === objectId);
+      const safe = sanitizeUpdates(updates, existing);
       setObjects((prev) =>
-        prev.map((o) => (o.id === objectId ? { ...o, ...updates } : o))
+        prev.map((o) => (o.id === objectId ? { ...o, ...safe } : o))
       );
-      await fbUpdateObject(boardId, objectId, updates);
+      return fbUpdateObject(boardId, objectId, safe);
     },
-    [boardId]
+    [boardId, objects]
+  );
+
+  const batchUpdateObjects = useCallback(
+    (updates: Array<{ objectId: string; updates: Partial<BoardObject> }>) => {
+      if (updates.length === 0) return;
+      const safeUpdates = updates.map(({ objectId, updates: ups }) => {
+        const existing = objects.find((o) => o.id === objectId);
+        return { objectId, updates: sanitizeUpdates(ups, existing) };
+      });
+      setObjects((prev) => {
+        const byId = new Map(prev.map((o) => [o.id, o]));
+        for (const { objectId, updates: ups } of safeUpdates) {
+          const current = byId.get(objectId);
+          if (current) byId.set(objectId, { ...current, ...ups });
+        }
+        return prev.map((o) => byId.get(o.id) ?? o);
+      });
+      void fbUpdateObjectsBatch(boardId, safeUpdates);
+    },
+    [boardId, objects]
   );
 
   const deleteObject = useCallback(
@@ -124,5 +181,5 @@ export function useBoardObjects(boardId: string) {
     await fbClearObjects(boardId);
   }, [boardId]);
 
-  return { objects, addObject, updateObject, deleteObject, clearObjects, markDragging, unmarkDragging };
+  return { objects, addObject, updateObject, batchUpdateObjects, deleteObject, clearObjects, markDragging, unmarkDragging };
 }

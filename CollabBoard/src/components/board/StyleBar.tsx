@@ -359,32 +359,39 @@ export function StyleBar({
   const isText = selectedObject.type === 'sticky' || selectedObject.type === 'text';
   const isLine = selectedObject.type === 'line';
   const isShape = ['rectangle', 'circle', 'triangle', 'star'].includes(selectedObject.type);
+  const isFrame = selectedObject.type === 'frame';
 
   const display = liveTransform || selectedObject;
 
+  // Coerce to finite numbers to avoid NaN/Infinity (e.g. after rotating text inside frame) causing white screen
+  const safeNum = (v: number, fallback: number) => (Number.isFinite(v) ? v : fallback);
+  const safeX = safeNum(display.x, selectedObject.x);
+  const safeY = safeNum(display.y, selectedObject.y);
+  const safeW = Math.max(20, safeNum(display.width, selectedObject.width));
+  const safeH = Math.max(20, safeNum(display.height, selectedObject.height));
+  const safeRot = safeNum(display.rotation ?? 0, selectedObject.rotation ?? 0);
+
   // Position the bar above the selected shape, centered horizontally
   const pos = useMemo(() => {
-    const { x, y, width, height, rotation } = display;
-    const rad = ((rotation || 0) * Math.PI) / 180;
+    const rad = (safeRot * Math.PI) / 180;
     const cosR = Math.cos(rad);
     const sinR = Math.sin(rad);
-    const centerWorldX = x + (width / 2) * cosR - (height / 2) * sinR;
-    const centerWorldY = y + (width / 2) * sinR + (height / 2) * cosR;
+    const centerWorldX = safeX + (safeW / 2) * cosR - (safeH / 2) * sinR;
+    const centerWorldY = safeY + (safeW / 2) * sinR + (safeH / 2) * cosR;
     const screenPt = worldToScreen(centerWorldX, centerWorldY, viewport);
-    const halfScreenH = (height * viewport.scaleY) / 2;
-    return {
-      left: screenPt.x,
-      top: Math.max(EDGE_PADDING, screenPt.y - halfScreenH - TOOLBAR_GAP - BAR_HEIGHT),
-    };
-  }, [display, viewport]);
+    const halfScreenH = (safeH * viewport.scaleY) / 2;
+    const left = Number.isFinite(screenPt.x) ? screenPt.x : 0;
+    const top = Number.isFinite(screenPt.y) ? Math.max(EDGE_PADDING, screenPt.y - halfScreenH - TOOLBAR_GAP - BAR_HEIGHT) : EDGE_PADDING;
+    return { left, top };
+  }, [safeX, safeY, safeW, safeH, safeRot, viewport]);
 
   // Local editing state for numeric fields
   const [focusedField, setFocusedField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
 
-  const derivedX = String(Math.round(display.x));
-  const derivedY = String(Math.round(-display.y));
-  const derivedRotation = String(Math.round(display.rotation ?? 0));
+  const derivedX = String(Math.round(safeX));
+  const derivedY = String(Math.round(-safeY));
+  const derivedRotation = String(Math.round(safeRot));
 
   const getDisplayValue = (field: string, derived: string) =>
     focusedField === field ? editValue : derived;
@@ -457,8 +464,8 @@ export function StyleBar({
       : "'Segoe UI', system-ui, sans-serif");
 
   // Dimensions
-  const derivedW = String(Math.round(display.width));
-  const derivedH = String(Math.round(display.height));
+  const derivedW = String(Math.round(safeW));
+  const derivedH = String(Math.round(safeH));
 
   const handleDimensionBlur = useCallback((field: 'width' | 'height') => {
     setFocusedField(null);
@@ -485,8 +492,8 @@ export function StyleBar({
       style={{ left: pos.left, top: pos.top }}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      {/* Shape Switcher (shapes only, not lines or text, single select only) */}
-      {!isMulti && isShape && (
+      {/* Shape Switcher (shapes only, not lines or text or frame, single select only) */}
+      {!isMulti && !isFrame && isShape && (
         <>
           <ShapeSwitcher currentType={selectedObject.type} onChange={handleShapeChange} />
           <div className="sb-divider" />
@@ -526,30 +533,32 @@ export function StyleBar({
         </>
       )}
 
-      {/* Fill / Text color: text box = text color only; sticky = fill + text color; shapes = fill */}
-      <ColorSwatchPicker
-        color={
-          selectedObject.type === 'text'
-            ? (selectedObject.textColor ?? '#333333')
-            : selectedObject.color
-        }
-        onChange={(c) =>
-          selectedObject.type === 'text'
-            ? onUpdate({ textColor: c })
-            : onUpdate({ color: c })
-        }
-        label={
-          selectedObject.type === 'text'
-            ? 'Text color'
-            : isLine
-              ? 'Stroke color'
-              : isShape
-                ? 'Fill color'
-                : 'Fill color'
-        }
-      />
+      {/* Fill / Text color (hidden for multi-select and frame) */}
+      {!isMulti && !isFrame && (
+        <ColorSwatchPicker
+          color={
+            selectedObject.type === 'text'
+              ? (selectedObject.textColor ?? '#333333')
+              : selectedObject.color
+          }
+          onChange={(c) =>
+            selectedObject.type === 'text'
+              ? onUpdate({ textColor: c })
+              : onUpdate({ color: c })
+          }
+          label={
+            selectedObject.type === 'text'
+              ? 'Text color'
+              : isLine
+                ? 'Stroke color'
+                : isShape
+                  ? 'Fill color'
+                  : 'Fill color'
+          }
+        />
+      )}
       {/* Text color for sticky note (separate from fill) */}
-      {!isMulti && selectedObject.type === 'sticky' && (
+      {!isMulti && !isFrame && selectedObject.type === 'sticky' && (
         <>
           <div className="sb-divider" />
           <ColorSwatchPicker
@@ -560,8 +569,8 @@ export function StyleBar({
         </>
       )}
 
-      {/* Stroke width for shapes (no separate stroke color) */}
-      {!isMulti && isShape && (
+      {/* Stroke width for shapes (no separate stroke color; frames get stroke in frame block) */}
+      {!isMulti && !isFrame && isShape && (
         <>
           <div className="sb-divider" />
           <div className="sb-field">
@@ -609,8 +618,37 @@ export function StyleBar({
         </>
       )}
 
-      {/* Font controls (text objects only) */}
-      {isText && (
+      {/* Frame: border color + stroke width only */}
+      {!isMulti && isFrame && (
+        <>
+          <ColorSwatchPicker
+            color={selectedObject.strokeColor ?? selectedObject.color ?? '#3366ff'}
+            onChange={(c) => onUpdate({ strokeColor: c })}
+            label="Border color"
+          />
+          <div className="sb-divider" />
+          <div className="sb-field">
+            <label title="Border width">W</label>
+            <input
+              type="number"
+              className="sb-input sb-input-sm"
+              value={getDisplayValue('strokeWidth', String(selectedObject.strokeWidth ?? 2))}
+              onFocus={() => handleFocus('strokeWidth', String(selectedObject.strokeWidth ?? 2))}
+              onChange={(e) => setEditValue(e.target.value)}
+              onBlur={handleStrokeWidthBlur}
+              onKeyDown={handleKeyDown}
+              min={1}
+              max={10}
+              aria-label="Border width"
+              title="Border width"
+            />
+          </div>
+          <div className="sb-divider" />
+        </>
+      )}
+
+      {/* Font controls (text objects only; hidden for multi-select and frame) */}
+      {!isFrame && !isMulti && isText && (
         <>
           <div className="sb-divider" />
           <div className="sb-group">
@@ -673,8 +711,37 @@ export function StyleBar({
 
       <div className="sb-divider" />
 
-      {/* Dimensions + Coordinates (single select only) */}
-      {!isMulti && (
+      {/* Position/size: X/Y only for multi-select; W, H, X, Y, ° for single shape or frame (same as rectangle) */}
+      {isMulti ? (
+        <div className="sb-group">
+          <div className="sb-field">
+            <label>X</label>
+            <input
+              type="number"
+              className="sb-input"
+              value={getDisplayValue('x', derivedX)}
+              onFocus={() => handleFocus('x', derivedX)}
+              onChange={(e) => setEditValue(e.target.value)}
+              onBlur={() => handleNumberBlur('x')}
+              onKeyDown={handleKeyDown}
+              aria-label="X"
+            />
+          </div>
+          <div className="sb-field">
+            <label>Y</label>
+            <input
+              type="number"
+              className="sb-input"
+              value={getDisplayValue('y', derivedY)}
+              onFocus={() => handleFocus('y', derivedY)}
+              onChange={(e) => setEditValue(e.target.value)}
+              onBlur={() => handleNumberBlur('y')}
+              onKeyDown={handleKeyDown}
+              aria-label="Y"
+            />
+          </div>
+        </div>
+      ) : (
         <div className="sb-group">
           {!isLine && (
             <>

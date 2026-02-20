@@ -37,25 +37,6 @@ export function TextElement({
   remoteEditing,
   remoteTransform,
 }: TextElementProps) {
-  // Auto-expand: measure text height and update object if needed
-  useEffect(() => {
-    const displayText = remoteEditing ? remoteEditing.text : (object.text ?? '');
-    if (!displayText) return; // Don't auto-expand for empty/placeholder text
-    const textWidth = object.width - TEXT_ELEMENT_PADDING * 2;
-    const neededHeight = measureTextHeight({
-      text: displayText,
-      width: textWidth,
-      fontSize: object.fontSize || TEXT_ELEMENT_FONT_SIZE,
-      fontFamily: object.fontFamily || TEXT_ELEMENT_FONT_FAMILY,
-    }) + TEXT_ELEMENT_PADDING * 2;
-
-    const requiredHeight = Math.max(TEXT_ELEMENT_MIN_HEIGHT, neededHeight);
-
-    if (Math.abs(requiredHeight - object.height) > 1) {
-      onUpdate({ height: requiredHeight });
-    }
-  }, [object.text, object.width, object.height, remoteEditing, onUpdate]);
-
   const handleDoubleClick = () => {
     onDoubleClick?.();
   };
@@ -76,44 +57,75 @@ export function TextElement({
     onRightClick?.(e.evt.clientX, e.evt.clientY);
   };
 
+  useEffect(() => {
+    const displayText = remoteEditing ? remoteEditing.text : (object.text ?? '');
+    if (!displayText) return;
+    if (!Number.isFinite(object.width) || !Number.isFinite(object.height) || object.width <= 0 || object.height <= 0) return;
+    const textWidth = object.width - TEXT_ELEMENT_PADDING * 2;
+    if (!Number.isFinite(textWidth) || textWidth <= 0) return;
+    const neededTextHeight = measureTextHeight({
+      text: displayText,
+      width: textWidth,
+      fontSize: object.fontSize || TEXT_ELEMENT_FONT_SIZE,
+      fontFamily: object.fontFamily || TEXT_ELEMENT_FONT_FAMILY,
+    });
+    if (!Number.isFinite(neededTextHeight)) return;
+    const requiredHeight = Math.max(
+      TEXT_ELEMENT_MIN_HEIGHT,
+      TEXT_ELEMENT_PADDING + neededTextHeight + TEXT_ELEMENT_PADDING,
+    );
+    if (!Number.isFinite(requiredHeight)) return;
+    if (requiredHeight > object.height && Math.abs(requiredHeight - object.height) > 1) {
+      onUpdate({ height: requiredHeight });
+    }
+  }, [object.text, object.width, object.height, remoteEditing, onUpdate]);
+
+  const x = Number.isFinite(object.x) ? object.x : 0;
+  const y = Number.isFinite(object.y) ? object.y : 0;
+  const w = Number.isFinite(object.width) && object.width > 0 ? object.width : 200;
+  const h = Number.isFinite(object.height) && object.height > 0 ? object.height : 40;
+  const rot = Number.isFinite(object.rotation) ? (object.rotation ?? 0) : 0;
+
+  const hasContent = remoteEditing ? !!remoteEditing.text : !!object.text;
   const displayText = remoteEditing
     ? remoteEditing.text
     : (object.text || 'Type text');
 
-  const hasContent = remoteEditing ? !!remoteEditing.text : !!object.text;
-
   return (
     <Group
       id={object.id}
-      x={object.x}
-      y={object.y}
-      rotation={object.rotation || 0}
+      x={x}
+      y={y}
+      width={w}
+      height={h}
+      rotation={rot}
       draggable
       onClick={handleClick}
       onTap={() => onSelect(false)}
       onDblClick={handleDoubleClick}
-      onDragStart={onDragStart}
       onDblTap={handleDoubleClick}
       onContextMenu={handleContextMenu}
+      onDragStart={onDragStart}
       onDragMove={onDragMove}
       onDragEnd={(e) => {
         onUpdate({ x: e.target.x(), y: e.target.y() });
         onDragEndExtra?.();
       }}
     >
-      {/* Background: transparent, with dashed border when selected */}
+      {/* Clear background — visible border only when selected */}
       <Rect
-        width={object.width}
-        height={object.height}
+        width={w}
+        height={h}
         fill="transparent"
         stroke={isSelected ? '#4285f4' : 'transparent'}
         strokeWidth={isSelected ? 2 : 0}
         dash={isSelected ? [6, 4] : undefined}
+        cornerRadius={2}
       />
       {/* Text content */}
       <Text
         text={displayText}
-        width={object.width - TEXT_ELEMENT_PADDING * 2}
+        width={w - TEXT_ELEMENT_PADDING * 2}
         x={TEXT_ELEMENT_PADDING}
         y={TEXT_ELEMENT_PADDING}
         fontSize={object.fontSize || TEXT_ELEMENT_FONT_SIZE}
@@ -130,21 +142,22 @@ export function TextElement({
         verticalAlign="top"
         wrap="word"
       />
-      {/* Remote user's live editing indicator */}
+      {/* Remote editing indicator */}
       {remoteEditing && (
         <>
           <Rect
             x={0}
             y={0}
-            width={object.width}
-            height={object.height}
+            width={w}
+            height={h}
             stroke={remoteEditing.userColor}
             strokeWidth={3}
             dash={[8, 4]}
+            cornerRadius={2}
             listening={false}
           />
           <Rect
-            x={object.width - 90}
+            x={w - 90}
             y={-20}
             width={90}
             height={18}
@@ -154,7 +167,7 @@ export function TextElement({
           />
           <Text
             text={`${remoteEditing.userName} typing...`}
-            x={object.width - 88}
+            x={w - 88}
             y={-18}
             width={86}
             height={14}
@@ -173,15 +186,16 @@ export function TextElement({
           <Rect
             x={-2}
             y={-2}
-            width={object.width + 4}
-            height={object.height + 4}
+            width={w + 4}
+            height={h + 4}
             stroke={remoteTransform.userColor}
             strokeWidth={2}
             dash={[6, 3]}
+            cornerRadius={2}
             listening={false}
           />
           <Rect
-            x={object.width - 60}
+            x={w - 60}
             y={-20}
             width={60}
             height={18}
@@ -191,7 +205,7 @@ export function TextElement({
           />
           <Text
             text={remoteTransform.userName}
-            x={object.width - 58}
+            x={w - 58}
             y={-18}
             width={56}
             height={14}

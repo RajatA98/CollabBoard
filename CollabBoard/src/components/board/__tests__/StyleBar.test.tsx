@@ -132,9 +132,10 @@ describe('StyleBar', () => {
     expect(screen.getByLabelText('Y')).toBeInTheDocument();
   });
 
-  it('hides coordinates and shape switcher for multi-select', () => {
+  it('for multi-select shows only X/Y and Delete, hides shape switcher and other controls', () => {
     renderBar({}, { onUpdate, onDelete, selectedCount: 3 });
-    expect(screen.queryByLabelText('X')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('X')).toBeInTheDocument();
+    expect(screen.getByLabelText('Y')).toBeInTheDocument();
     expect(screen.queryByTestId('shape-switcher')).not.toBeInTheDocument();
   });
 
