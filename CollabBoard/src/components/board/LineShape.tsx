@@ -86,6 +86,8 @@ export function LineShape({ object, isSelected, onSelect, onUpdate, onDoubleClic
   const points = buildRelativeFlatPoints(object);
   const ptRel = relativePoints(object);
   const arrowType = object.arrowType ?? 'none';
+  const sw = object.strokeWidth ?? 2;
+  const dash = object.lineStyle === 'dashed' ? [8, 6] : object.lineStyle === 'dotted' ? [2, 4] : undefined;
 
   const endArrow = (arrowType === 'single' || arrowType === 'double') && ptRel.length >= 2
     ? arrowHead(ptRel[ptRel.length - 1].x, ptRel[ptRel.length - 1].y, ptRel[ptRel.length - 2].x, ptRel[ptRel.length - 2].y)
@@ -102,6 +104,7 @@ export function LineShape({ object, isSelected, onSelect, onUpdate, onDoubleClic
       id={object.id}
       x={object.x}
       y={object.y}
+      rotation={object.rotation ?? 0}
       draggable={!isConnected}
       onClick={handleClick}
       onTap={() => onSelect(false)}
@@ -134,16 +137,17 @@ export function LineShape({ object, isSelected, onSelect, onUpdate, onDoubleClic
       <Line
         points={points}
         stroke={object.color || '#424242'}
-        strokeWidth={isSelected ? 3 : 2}
+        strokeWidth={isSelected ? sw + 1 : sw}
         lineCap="round"
         lineJoin="round"
+        dash={dash}
         listening={false}
       />
       {endArrow && (
         <Line
           points={endArrow}
           stroke={object.color || '#424242'}
-          strokeWidth={2}
+          strokeWidth={sw}
           lineCap="round"
           lineJoin="round"
           listening={false}
@@ -153,7 +157,7 @@ export function LineShape({ object, isSelected, onSelect, onUpdate, onDoubleClic
         <Line
           points={startArrow}
           stroke={object.color || '#424242'}
-          strokeWidth={2}
+          strokeWidth={sw}
           lineCap="round"
           lineJoin="round"
           listening={false}

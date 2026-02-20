@@ -27,12 +27,7 @@ interface StickyNoteProps {
 
 export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleClick, onRightClick, onDragStart, onDragMove, onDragEndExtra, remoteEditing, remoteTransform }: StickyNoteProps) {
   const handleDoubleClick = () => {
-    console.log('Sticky note double-clicked!', object.id);
-    if (onDoubleClick) {
-      onDoubleClick();
-    } else {
-      console.error('onDoubleClick handler not provided');
-    }
+    onDoubleClick?.();
   };
 
   const handleClick = (e: KonvaEventObject<MouseEvent>) => {
@@ -55,30 +50,43 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
   useEffect(() => {
     const displayText = remoteEditing ? remoteEditing.text : (object.text ?? '');
     if (!displayText) return;
-    const textWidth = object.width - 16; // matches Text node width={object.width - 16}
+    // Guard: avoid NaN from bad transform (e.g. after rotation) — never persist non-finite values
+    if (!Number.isFinite(object.width) || !Number.isFinite(object.height) || object.width <= 0 || object.height <= 0) return;
+    const textWidth = object.width - 16; // matches Text node width
+    if (!Number.isFinite(textWidth) || textWidth <= 0) return;
     const neededTextHeight = measureTextHeight({
       text: displayText,
       width: textWidth,
-      fontSize: STICKY_FONT_SIZE,
-      fontFamily: STICKY_FONT_FAMILY,
+      fontSize: object.fontSize || STICKY_FONT_SIZE,
+      fontFamily: object.fontFamily || STICKY_FONT_FAMILY,
     });
-
+    if (!Number.isFinite(neededTextHeight)) return;
     const requiredHeight = Math.max(
       STICKY_MIN_HEIGHT,
       STICKY_TEXT_OFFSET_Y + neededTextHeight + STICKY_TEXT_PADDING_BOTTOM
     );
+    if (!Number.isFinite(requiredHeight)) return;
     // Only expand when text needs more space; never shrink
     if (requiredHeight > object.height && Math.abs(requiredHeight - object.height) > 1) {
       onUpdate({ height: requiredHeight });
     }
   }, [object.text, object.width, object.height, remoteEditing, onUpdate]);
 
+  // Guard against NaN/Infinity (e.g. after rotating inside frame) so Konva never receives invalid numbers
+  const x = Number.isFinite(object.x) ? object.x : 0;
+  const y = Number.isFinite(object.y) ? object.y : 0;
+  const w = Number.isFinite(object.width) && object.width > 0 ? object.width : 100;
+  const h = Number.isFinite(object.height) && object.height > 0 ? object.height : 100;
+  const rot = Number.isFinite(object.rotation) ? (object.rotation ?? 0) : 0;
+
   return (
     <Group
       id={object.id}
-      x={object.x}
-      y={object.y}
-      rotation={object.rotation || 0}
+      x={x}
+      y={y}
+      width={w}
+      height={h}
+      rotation={rot}
       draggable
       onClick={handleClick}
       onTap={() => onSelect(false)}
@@ -94,11 +102,11 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
     >
       {/* Note background */}
       <Rect
-        width={object.width}
-        height={object.height}
-        fill={object.color || '#FFD54F'}
-        stroke={isSelected ? '#FFA726' : '#FFE082'}
-        strokeWidth={isSelected ? 3 : 1}
+        width={w}
+        height={h}
+        fill={object.color || '#FFD700'}
+        stroke={object.strokeWidth === 0 ? 'transparent' : (isSelected ? '#FFA726' : '#FFE082')}
+        strokeWidth={object.strokeWidth === 0 ? 0 : (isSelected ? 3 : 1)}
         cornerRadius={2}
         shadowColor="rgba(0,0,0,0.2)"
         shadowBlur={8}
@@ -106,26 +114,23 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
         shadowOffsetY={4}
         shadowOpacity={0.3}
       />
-      {/* "Note:" label at top left */}
-      <Text
-        text="Note:"
-        x={8}
-        y={6}
-        fontSize={12}
-        fontFamily="'Segoe UI', system-ui, sans-serif"
-        fill="#666"
-        fontStyle="bold"
-      />
       {/* Text content */}
       <Text
-        text={remoteEditing ? remoteEditing.text : (object.text ?? 'Click to edit')}
-        width={object.width - 16}
+        text={remoteEditing ? remoteEditing.text : (object.text || 'Type your note...')}
+        width={w - 16}
         x={8}
-        y={26}
-        fontSize={16}
-        fontFamily="'Segoe Print', 'Comic Sans MS', cursive"
-        fill={remoteEditing ? '#333' : (object.text ? '#333' : '#999')}
-        fontStyle={remoteEditing ? 'normal' : (object.text ? 'normal' : 'italic')}
+        y={8}
+        fontSize={object.fontSize || STICKY_FONT_SIZE}
+        fontFamily={object.fontFamily || STICKY_FONT_FAMILY}
+        fill={object.textColor ?? (remoteEditing ? '#333' : (object.text ? '#333' : '#999'))}
+        fontStyle={
+          remoteEditing
+            ? 'normal'
+            : object.text
+              ? [object.bold && 'bold', object.italic && 'italic'].filter(Boolean).join(' ') || 'normal'
+              : 'italic'
+        }
+        textDecoration={object.underline ? 'underline' : ''}
         opacity={remoteEditing ? 0.7 : 1}
         align="left"
         verticalAlign="top"
@@ -137,8 +142,8 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
           <Rect
             x={0}
             y={0}
-            width={object.width}
-            height={object.height}
+            width={w}
+            height={h}
             stroke={remoteEditing.userColor}
             strokeWidth={3}
             cornerRadius={2}
@@ -146,7 +151,7 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
             listening={false}
           />
           <Rect
-            x={object.width - 90}
+            x={w - 90}
             y={-20}
             width={90}
             height={18}
@@ -156,7 +161,7 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
           />
           <Text
             text={`${remoteEditing.userName} typing...`}
-            x={object.width - 88}
+            x={w - 88}
             y={-18}
             width={86}
             height={14}
@@ -175,8 +180,8 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
           <Rect
             x={-2}
             y={-2}
-            width={object.width + 4}
-            height={object.height + 4}
+            width={w + 4}
+            height={h + 4}
             stroke={remoteTransform.userColor}
             strokeWidth={2}
             cornerRadius={2}
@@ -184,7 +189,7 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
             listening={false}
           />
           <Rect
-            x={object.width - 60}
+            x={w - 60}
             y={-20}
             width={60}
             height={18}
@@ -194,7 +199,7 @@ export function StickyNote({ object, isSelected, onSelect, onUpdate, onDoubleCli
           />
           <Text
             text={remoteTransform.userName}
-            x={object.width - 58}
+            x={w - 58}
             y={-18}
             width={56}
             height={14}

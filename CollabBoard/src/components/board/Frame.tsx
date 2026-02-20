@@ -1,8 +1,10 @@
+import { useRef, useEffect, useState } from 'react';
 import { Rect, Group, Text } from 'react-konva';
 import type { BoardObject, LiveTransformData } from '../../types';
 import type { KonvaEventObject } from 'konva/lib/Node';
+import Konva from 'konva';
 
-interface RectangleProps {
+interface FrameProps {
   object: BoardObject;
   isSelected: boolean;
   onSelect: (additive: boolean) => void;
@@ -15,7 +17,24 @@ interface RectangleProps {
   remoteTransform?: LiveTransformData;
 }
 
-export function Rectangle({ object, isSelected, onSelect, onUpdate, onDoubleClick, onRightClick, onDragStart, onDragMove, onDragEndExtra, remoteTransform }: RectangleProps) {
+const FRAME_BORDER_COLOR = '#3366ff';
+const FRAME_BORDER_COLOR_SELECTED = '#5588ff';
+const FRAME_BG_COLOR = 'rgba(51, 102, 255, 0.05)';
+const TITLE_BG_COLOR = '#3366ff';
+const TITLE_HEIGHT = 22;
+const TITLE_PADDING = 8;
+const TITLE_FONT_SIZE = 13;
+
+export function Frame({ object, isSelected, onSelect, onUpdate, onDoubleClick, onRightClick, onDragStart, onDragMove, onDragEndExtra, remoteTransform }: FrameProps) {
+  const titleTextRef = useRef<Konva.Text>(null);
+  const [titleWidth, setTitleWidth] = useState(80);
+
+  useEffect(() => {
+    if (titleTextRef.current) {
+      setTitleWidth(titleTextRef.current.getTextWidth() + TITLE_PADDING * 2);
+    }
+  }, [object.text]);
+
   const handleClick = (e: KonvaEventObject<MouseEvent>) => {
     if (e.evt && e.evt.button === 2) {
       e.evt.preventDefault();
@@ -31,6 +50,10 @@ export function Rectangle({ object, isSelected, onSelect, onUpdate, onDoubleClic
     e.evt.preventDefault();
     onRightClick?.(e.evt.clientX, e.evt.clientY);
   };
+
+  const title = object.text || 'Frame';
+  const borderColor = object.strokeColor ?? (isSelected ? FRAME_BORDER_COLOR_SELECTED : FRAME_BORDER_COLOR);
+  const borderWidth = object.strokeWidth ?? 2;
 
   return (
     <Group
@@ -51,15 +74,43 @@ export function Rectangle({ object, isSelected, onSelect, onUpdate, onDoubleClic
         onDragEndExtra?.();
       }}
     >
+      {/* Frame background - subtle fill */}
       <Rect
         width={object.width}
         height={object.height}
-        offsetX={0}
-        offsetY={0}
-        fill={object.color}
-        stroke={isSelected ? '#0066ff' : (object.strokeColor || '#ccc')}
-        strokeWidth={isSelected ? 2 : (object.strokeWidth ?? 1)}
+        fill={FRAME_BG_COLOR}
+        cornerRadius={0}
       />
+      {/* Frame border */}
+      <Rect
+        width={object.width}
+        height={object.height}
+        stroke={borderColor}
+        strokeWidth={borderWidth}
+        cornerRadius={0}
+      />
+      {/* Title background - positioned above frame top edge */}
+      <Rect
+        x={0}
+        y={-TITLE_HEIGHT}
+        width={Math.min(titleWidth, object.width)}
+        height={TITLE_HEIGHT}
+        fill={TITLE_BG_COLOR}
+        cornerRadius={[4, 4, 0, 0]}
+      />
+      {/* Title text */}
+      <Text
+        ref={titleTextRef}
+        text={title}
+        x={TITLE_PADDING}
+        y={-TITLE_HEIGHT + 4}
+        fontSize={TITLE_FONT_SIZE}
+        fontFamily="system-ui, sans-serif"
+        fontStyle="bold"
+        fill="#ffffff"
+        listening={false}
+      />
+      {/* Remote transform overlay */}
       {remoteTransform && (
         <>
           <Rect

@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthPage } from './components/auth/AuthPage';
 import { Dashboard } from './components/dashboard/Dashboard';
 import { Board } from './components/board/Board';
+import { BoardErrorBoundary } from './components/board/BoardErrorBoundary';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
 
 function App() {
@@ -20,7 +21,9 @@ function App() {
         path="/board/:boardId"
         element={
           <ProtectedRoute>
-            <Board />
+            <BoardErrorBoundary>
+              <Board />
+            </BoardErrorBoundary>
           </ProtectedRoute>
         }
       />

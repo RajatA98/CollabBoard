@@ -7,7 +7,7 @@ import { PresenceBar } from './PresenceBar';
 import { ShapeSidebar } from './ShapeSidebar';
 import { AICommandPanel } from './AICommandPanel';
 import { UndoRedoClearPanel } from './UndoRedoClearPanel';
-import { StylePanel } from './StylePanel';
+import { StyleBar } from './StyleBar';
 import { ContextMenu } from './ContextMenu';
 import { useAuth } from '../../hooks/useAuth';
 import { useBoardObjects } from '../../hooks/useBoardObjects';
@@ -29,7 +29,7 @@ function generateId() {
 export function Board() {
   const { boardId = 'default' } = useParams();
   const { user, logout } = useAuth();
-  const { objects, addObject, updateObject, deleteObject, clearObjects, markDragging, unmarkDragging } = useBoardObjects(boardId);
+  const { objects, addObject, updateObject, batchUpdateObjects, deleteObject, clearObjects, markDragging, unmarkDragging } = useBoardObjects(boardId);
   const { cursors, updateCursor, cleanupCursor } = useCursors(boardId, user);
   const { onlineUsers, cleanupPresence } = usePresence(boardId, user, cursors);
   const { viewport, setPosition, zoomAtPoint } = useViewport(boardId);
@@ -63,13 +63,17 @@ export function Board() {
     width: number;
     height: number;
     text: string;
-    objectType: 'sticky' | 'text';
+    objectType: 'sticky' | 'text' | 'frame';
   } | null>(null);
-  const [stylePanelOpen, setStylePanelOpen] = useState(false);
   const [shapesPanelOpen, setShapesPanelOpen] = useState(false);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
-  const [boardMeta, setBoardMeta] = useState<BoardMeta | null>(null);
   const [isDraggingShapeFromSidebar, setIsDraggingShapeFromSidebar] = useState(false);
+  const [boardMeta, setBoardMeta] = useState<BoardMeta | null>(null);
+  const [deleteFrameConfirm, setDeleteFrameConfirm] = useState<{
+    selectedIds: string[];
+    frameIds: Set<string>;
+    childCount: number;
+  } | null>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef(viewport);
   viewportRef.current = viewport;
@@ -123,10 +127,25 @@ export function Board() {
           prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
         );
       } else {
-        setSelectedObjectIds([id]);
+        const obj = objects.find((o) => o.id === id);
+        if (!obj) {
+          setSelectedObjectIds([id]);
+          return;
+        }
+        // Treat frame group as one: clicking frame or any child selects frame + all its children (marquee transform logic)
+        if (obj.type === 'frame') {
+          const childIds = objects.filter((o) => o.frameId === id).map((o) => o.id);
+          setSelectedObjectIds([id, ...childIds]);
+        } else if (obj.frameId) {
+          const frameId = obj.frameId;
+          const childIds = objects.filter((o) => o.frameId === frameId).map((o) => o.id);
+          setSelectedObjectIds([frameId, ...childIds]);
+        } else {
+          setSelectedObjectIds([id]);
+        }
       }
     },
-    [remoteSelectionByObject]
+    [remoteSelectionByObject, objects]
   );
 
   const clearSelection = useCallback(() => {
@@ -153,7 +172,7 @@ export function Board() {
     selectedCount: selectedObjectIds.length,
   });
 
-  const createObjectAtCenter = useCallback((type: 'rectangle' | 'sticky' | 'text' | 'circle' | 'line' | 'arrow-single' | 'arrow-double' | 'triangle' | 'star') => {
+  const createObjectAtCenter = useCallback((type: 'rectangle' | 'sticky' | 'text' | 'circle' | 'line' | 'arrow-single' | 'arrow-double' | 'triangle' | 'star' | 'frame') => {
     if (!user) {
       console.error('❌ No user found - cannot create object');
       return;
@@ -184,7 +203,8 @@ export function Board() {
         height: noteHeight,
         rotation: 0,
         text: '',
-        color: '#FFD54F',
+        color: '#FFD700',
+        strokeWidth: 0,
         createdBy: user.uid,
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -204,6 +224,7 @@ export function Board() {
         rotation: 0,
         text: '',
         color: 'transparent',
+        strokeWidth: 0,
         createdBy: user.uid,
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -220,7 +241,10 @@ export function Board() {
         width: circleSize,
         height: circleSize,
         rotation: 0,
-        color: '#CE93D8',
+        color: '#FFFFFF',
+        strokeColor: '#000000',
+        strokeWidth: 2,
+        aspectRatio: 1,
         createdBy: user.uid,
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -237,7 +261,9 @@ export function Board() {
         width: lineWidth,
         height: 0,
         rotation: 0,
-        color: '#424242',
+        color: '#000000',
+        strokeColor: '#000000',
+        strokeWidth: 2,
         arrowType: type === 'arrow-single' ? 'single' : type === 'arrow-double' ? 'double' : 'none',
         waypoints: [],
         createdBy: user.uid,
@@ -257,7 +283,10 @@ export function Board() {
         width: triWidth,
         height: triHeight,
         rotation: 0,
-        color: '#81C784',
+        color: '#FFFFFF',
+        strokeColor: '#000000',
+        strokeWidth: 2,
+        aspectRatio: triWidth / triHeight,
         createdBy: user.uid,
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -274,13 +303,35 @@ export function Board() {
         width: starSize,
         height: starSize,
         rotation: 0,
-        color: '#FFB74D',
+        color: '#FFFFFF',
+        strokeColor: '#000000',
+        strokeWidth: 2,
+        aspectRatio: 1,
         createdBy: user.uid,
         createdAt: Date.now(),
         updatedAt: Date.now(),
         updatedBy: user.uid,
       };
       console.log('⭐ Creating star:', newObject);
+    } else if (type === 'frame') {
+      const frameWidth = 300;
+      const frameHeight = 200;
+      const existingFrameCount = objects.filter(o => o.type === 'frame').length;
+      newObject = {
+        id,
+        type: 'frame',
+        x: worldCenterX - (frameWidth / 2),
+        y: worldCenterY - (frameHeight / 2),
+        width: frameWidth,
+        height: frameHeight,
+        rotation: 0,
+        text: `Frame ${existingFrameCount + 1}`,
+        color: '#3366ff',
+        createdBy: user.uid,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        updatedBy: user.uid,
+      };
     } else {
       const rectWidth = 200;
       const rectHeight = 150;
@@ -292,7 +343,10 @@ export function Board() {
         width: rectWidth,
         height: rectHeight,
         rotation: 0,
-        color: '#90CAF9',
+        color: '#FFFFFF',
+        strokeColor: '#000000',
+        strokeWidth: 2,
+        aspectRatio: rectWidth / rectHeight,
         createdBy: user.uid,
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -306,24 +360,96 @@ export function Board() {
         console.log(`✅ ${type} added to Firestore successfully`);
         setSelectedObjectIds([id]);
         pushAction({ type: 'add', objects: [newObject] });
+        if (type === 'frame') {
+          const fx = newObject.x;
+          const fy = newObject.y;
+          const fRight = newObject.x + newObject.width;
+          const fBottom = newObject.y + newObject.height;
+          const contained = objects.filter(
+            (o) =>
+              o.id !== newObject.id &&
+              o.x >= fx &&
+              o.y >= fy &&
+              (o.x + (o.width ?? 0)) <= fRight &&
+              (o.y + (o.height ?? 0)) <= fBottom
+          );
+          contained.forEach((o) => {
+            pushAction({ type: 'update', changes: [{ id: o.id, before: { frameId: o.frameId }, after: { frameId: newObject.id } }] });
+            updateObject(o.id, { frameId: newObject.id });
+          });
+        }
       })
       .catch((err) => {
         console.error(`❌ Failed to add ${type} to Firestore:`, err);
       });
-  }, [addObject, user, viewport, pushAction]);
+  }, [addObject, user, viewport, pushAction, objects, updateObject]);
 
   const handleCanvasClick = useCallback(() => {
     setContextMenu(null);
     setShapesPanelOpen(false);
   }, []);
 
+  const performDeleteSelected = useCallback(
+    (toDelete: BoardObject[], deletedFrameIds: Set<string>, deleteChildren: boolean) => {
+      if (deleteChildren) {
+        const childIds = new Set(objects.filter((o) => o.frameId && deletedFrameIds.has(o.frameId)).map((o) => o.id));
+        const allToDelete = objects.filter((o) => toDelete.some((d) => d.id === o.id) || childIds.has(o.id));
+        allToDelete.forEach((o) => deleteObject(o.id));
+        pushAction({ type: 'delete', objects: allToDelete });
+      } else {
+        const childrenToUnlink = objects.filter((o) => o.frameId && deletedFrameIds.has(o.frameId));
+        childrenToUnlink.forEach((o) => updateObject(o.id, { frameId: undefined }));
+        if (childrenToUnlink.length > 0) {
+          pushAction({
+            type: 'update',
+            changes: childrenToUnlink.map((o) => ({
+              id: o.id,
+              before: { frameId: o.frameId },
+              after: { frameId: undefined },
+            })),
+          });
+        }
+        toDelete.forEach((o) => deleteObject(o.id));
+        pushAction({ type: 'delete', objects: toDelete });
+      }
+      setSelectedObjectIds([]);
+      setDeleteFrameConfirm(null);
+    },
+    [objects, deleteObject, updateObject, pushAction]
+  );
+
   const handleDeleteSelected = useCallback(() => {
     if (selectedObjectIds.length === 0) return;
     const toDelete = objects.filter((o) => selectedObjectIds.includes(o.id));
-    toDelete.forEach((o) => deleteObject(o.id));
-    pushAction({ type: 'delete', objects: toDelete });
-    setSelectedObjectIds([]);
-  }, [selectedObjectIds, objects, deleteObject, pushAction]);
+    const deletedFrameIds = new Set(toDelete.filter((o) => o.type === 'frame').map((o) => o.id));
+    const childrenOfDeletedFrames = objects.filter((o) => o.frameId && deletedFrameIds.has(o.frameId));
+    const childCount = childrenOfDeletedFrames.length;
+
+    if (deletedFrameIds.size > 0 && childCount > 0) {
+      setDeleteFrameConfirm({
+        selectedIds: [...selectedObjectIds],
+        frameIds: deletedFrameIds,
+        childCount,
+      });
+      return;
+    }
+
+    performDeleteSelected(toDelete, deletedFrameIds, false);
+  }, [selectedObjectIds, objects, performDeleteSelected]);
+
+  const handleDeleteFrameConfirm = useCallback(
+    (action: 'deleteAll' | 'keepShapes' | 'cancel') => {
+      if (!deleteFrameConfirm) return;
+      if (action === 'cancel') {
+        setDeleteFrameConfirm(null);
+        return;
+      }
+      const toDelete = objects.filter((o) => deleteFrameConfirm.selectedIds.includes(o.id));
+      const deletedFrameIds = new Set(toDelete.filter((o) => o.type === 'frame').map((o) => o.id));
+      performDeleteSelected(toDelete, deletedFrameIds, action === 'deleteAll');
+    },
+    [deleteFrameConfirm, objects, performDeleteSelected]
+  );
 
   const handleCopySelected = useCallback(() => {
     if (selectedObjectIds.length === 0) return;
@@ -411,6 +537,68 @@ export function Board() {
       .catch((err) => console.error('❌ Failed to duplicate objects:', err));
   }, [objects, user, addObject, selectedObjectIds, pushAction]);
 
+  /** Get all objects that belong to a frame (frameId === frameId). */
+  const getShapesInFrame = useCallback((frameId: string) => {
+    return objects.filter((o) => o.frameId === frameId);
+  }, [objects]);
+
+  /** Find a frame that contains the point (world coords). First matching frame wins. */
+  const getFrameContainingPoint = useCallback((worldX: number, worldY: number) => {
+    return objects.find(
+      (o) =>
+        o.type === 'frame' &&
+        worldX >= o.x &&
+        worldX <= o.x + o.width &&
+        worldY >= o.y &&
+        worldY <= o.y + o.height
+    ) ?? null;
+  }, [objects]);
+
+  /** Return objects whose AABB is fully inside the frame bounds (excluding the frame itself). */
+  const detectShapesInFrame = useCallback((frame: BoardObject, objectList: BoardObject[]) => {
+    const fx = frame.x;
+    const fy = frame.y;
+    const fRight = frame.x + frame.width;
+    const fBottom = frame.y + frame.height;
+    return objectList.filter(
+      (o) =>
+        o.id !== frame.id &&
+        o.x >= fx &&
+        o.y >= fy &&
+        (o.x + (o.width ?? 0)) <= fRight &&
+        (o.y + (o.height ?? 0)) <= fBottom
+    );
+  }, []);
+
+  /** Find a frame whose bounds fully contain the given AABB (x, y, width, height). */
+  const getFrameContainingRect = useCallback(
+    (x: number, y: number, width: number, height: number) => {
+      const right = x + width;
+      const bottom = y + height;
+      return (
+        objects.find(
+          (o) =>
+            o.type === 'frame' &&
+            o.x <= x &&
+            o.y <= y &&
+            o.x + o.width >= right &&
+            o.y + o.height >= bottom
+        ) ?? null
+      );
+    },
+    [objects]
+  );
+
+  /** True if point (px, py) is inside frame's axis-aligned bounds (ignores frame rotation). */
+  const isPointInFrameBounds = useCallback((px: number, py: number, frame: BoardObject) => {
+    return (
+      px >= frame.x &&
+      px <= frame.x + frame.width &&
+      py >= frame.y &&
+      py <= frame.y + frame.height
+    );
+  }, []);
+
   const handleObjectUpdate = useCallback(
     (id: string, updates: Partial<BoardObject>) => {
       const obj = objects.find((o) => o.id === id);
@@ -420,9 +608,87 @@ export function Board() {
         ) as Partial<BoardObject>;
         pushAction({ type: 'update', changes: [{ id, before, after: updates }] });
       }
+
+      // When a frame is moved/resized/rotated, sync all contained shapes — batch into one Firestore write to reduce lag
+      if (obj?.type === 'frame') {
+        const children = getShapesInFrame(id);
+        if (children.length > 0) {
+          const newX = updates.x ?? obj.x;
+          const newY = updates.y ?? obj.y;
+          const newW = updates.width ?? obj.width;
+          const newH = updates.height ?? obj.height;
+          const newRot = updates.rotation ?? obj.rotation ?? 0;
+          const oldX = obj.x;
+          const oldY = obj.y;
+          const oldW = obj.width;
+          const oldH = obj.height;
+          const oldRot = obj.rotation ?? 0;
+
+          const scaleX = oldW > 0 ? newW / oldW : 1;
+          const scaleY = oldH > 0 ? newH / oldH : 1;
+          const rotDelta = newRot - oldRot;
+
+          const childChanges: Array<{ objectId: string; updates: Partial<BoardObject> }> = [];
+          for (const child of children) {
+            const relX = child.x - oldX;
+            const relY = child.y - oldY;
+            const newChildX = newX + relX * scaleX;
+            const newChildY = newY + relY * scaleY;
+            const newChildW = Math.max(20, child.width * scaleX);
+            const newChildH = Math.max(20, child.height * scaleY);
+            const newChildRot = (child.rotation ?? 0) + rotDelta;
+
+            childChanges.push({
+              objectId: child.id,
+              updates: {
+                x: newChildX,
+                y: newChildY,
+                width: newChildW,
+                height: newChildH,
+                rotation: newChildRot,
+              },
+            });
+          }
+          pushAction({
+            type: 'update',
+            changes: childChanges.map(({ objectId: cid, updates: u }) => {
+              const c = objects.find((o) => o.id === cid);
+              const before = c ? Object.fromEntries((Object.keys(u) as (keyof BoardObject)[]).map((k) => [k, c[k]])) as Partial<BoardObject> : {};
+              return { id: cid, before, after: u };
+            }),
+          });
+          batchUpdateObjects([{ objectId: id, updates }, ...childChanges]);
+          return;
+        }
+      }
+
       updateObject(id, updates);
+
+      // When a non-frame object is moved/resized, assign to or remove from a frame
+      if (obj && obj.type !== 'frame' && (updates.x !== undefined || updates.y !== undefined || updates.width !== undefined || updates.height !== undefined)) {
+        const newX = updates.x ?? obj.x;
+        const newY = updates.y ?? obj.y;
+        const newW = updates.width ?? obj.width;
+        const newH = updates.height ?? obj.height;
+        const containing = getFrameContainingRect(newX, newY, newW, newH);
+        if (containing) {
+          if (obj.frameId !== containing.id) {
+            pushAction({ type: 'update', changes: [{ id, before: { frameId: obj.frameId }, after: { frameId: containing.id } }] });
+            updateObject(id, { frameId: containing.id });
+          }
+        } else if (obj.frameId !== undefined) {
+          const frame = objects.find((o) => o.type === 'frame' && o.id === obj.frameId);
+          const centerX = newX + newW / 2;
+          const centerY = newY + newH / 2;
+          const stillInsideFrame = frame && isPointInFrameBounds(centerX, centerY, frame);
+          if (!stillInsideFrame) {
+            pushAction({ type: 'update', changes: [{ id, before: { frameId: obj.frameId }, after: { frameId: undefined } }] });
+            updateObject(id, { frameId: undefined });
+          }
+        }
+      }
     },
-    [objects, updateObject, pushAction]
+    [objects, updateObject, batchUpdateObjects, pushAction, getShapesInFrame, getFrameContainingRect, isPointInFrameBounds]
   );
 
   const handleBatchObjectUpdate = useCallback(
@@ -442,8 +708,32 @@ export function Board() {
         pushAction({ type: 'update', changes: undoChanges });
       }
       changes.forEach(({ id, updates: ups }) => updateObject(id, ups));
+      // Frame containment for each moved object
+      changes.forEach(({ id, updates: ups }) => {
+        const obj = objects.find((o) => o.id === id);
+        if (!obj || obj.type === 'frame') return;
+        if (ups.x === undefined && ups.y === undefined && ups.width === undefined && ups.height === undefined) return;
+        const newX = ups.x ?? obj.x;
+        const newY = ups.y ?? obj.y;
+        const newW = ups.width ?? obj.width;
+        const newH = ups.height ?? obj.height;
+        const containing = getFrameContainingRect(newX, newY, newW, newH);
+        if (containing && obj.frameId !== containing.id) {
+          pushAction({ type: 'update', changes: [{ id, before: { frameId: obj.frameId }, after: { frameId: containing.id } }] });
+          updateObject(id, { frameId: containing.id });
+        } else if (!containing && obj.frameId !== undefined) {
+          const frame = objects.find((o) => o.type === 'frame' && o.id === obj.frameId);
+          const centerX = newX + newW / 2;
+          const centerY = newY + newH / 2;
+          const stillInsideFrame = frame && isPointInFrameBounds(centerX, centerY, frame);
+          if (!stillInsideFrame) {
+            pushAction({ type: 'update', changes: [{ id, before: { frameId: obj.frameId }, after: { frameId: undefined } }] });
+            updateObject(id, { frameId: undefined });
+          }
+        }
+      });
     },
-    [objects, updateObject, pushAction]
+    [objects, updateObject, pushAction, getFrameContainingRect, isPointInFrameBounds]
   );
 
   const handleObjectDelete = useCallback(
@@ -456,17 +746,29 @@ export function Board() {
 
   const handleTextSubmit = useCallback(
     (text: string) => {
-      if (editingObject) {
-        // Use current object text from store so undo restores the correct value (avoids stale editingObject)
-        const obj = objects.find((o) => o.id === editingObject.id);
+      if (!editingObject) return;
+      const id = editingObject.id;
+      try {
+        const finalText = editingObject.objectType === 'frame'
+          ? (text.trim() || 'Untitled Frame')
+          : text;
+        const obj = objects.find((o) => o.id === id);
+        if (!obj) {
+          clearEditing();
+          setEditingObject(null);
+          return;
+        }
         const beforeText = (obj?.text ?? editingObject.text) ?? '';
-        if (beforeText !== text) {
+        if (beforeText !== finalText) {
           pushAction({
             type: 'update',
-            changes: [{ id: editingObject.id, before: { text: beforeText }, after: { text } }],
+            changes: [{ id, before: { text: beforeText }, after: { text: finalText } }],
           });
         }
-        updateObject(editingObject.id, { text });
+        updateObject(id, { text: finalText });
+      } catch (err) {
+        console.error('handleTextSubmit error:', err);
+      } finally {
         clearEditing();
         setEditingObject(null);
       }
@@ -485,17 +787,44 @@ export function Board() {
   const openTextEditorForObject = useCallback(
     (obj: BoardObject) => {
       if (obj.type !== 'sticky' && obj.type !== 'text') return;
-      const { x: screenX, y: screenY } = worldToScreen(obj.x, obj.y, viewport);
-      const screenWidth = obj.width * viewport.scaleX;
-      const screenHeight = obj.height * viewport.scaleY;
+      // Guard: avoid NaN from bad rotation/transform — never pass non-finite values to TextEditor
+      const x = Number.isFinite(obj.x) ? obj.x : 0;
+      const y = Number.isFinite(obj.y) ? obj.y : 0;
+      const w = Number.isFinite(obj.width) && obj.width > 0 ? obj.width : 200;
+      const h = Number.isFinite(obj.height) && obj.height > 0 ? obj.height : 100;
+      const { x: screenX, y: screenY } = worldToScreen(x, y, viewport);
+      const screenWidth = w * viewport.scaleX;
+      const screenHeight = h * viewport.scaleY;
       setEditingObject({
         id: obj.id,
-        x: screenX,
-        y: screenY,
-        width: screenWidth,
-        height: screenHeight,
+        x: Number.isFinite(screenX) ? screenX : 0,
+        y: Number.isFinite(screenY) ? screenY : 0,
+        width: Number.isFinite(screenWidth) && screenWidth > 0 ? screenWidth : 200,
+        height: Number.isFinite(screenHeight) && screenHeight > 0 ? screenHeight : 100,
         text: obj.text || '',
         objectType: obj.type as 'sticky' | 'text',
+      });
+      setSelectedObjectIds([obj.id]);
+      broadcastEditing(obj.id, obj.text ?? '');
+    },
+    [viewport, broadcastEditing]
+  );
+
+  const openFrameTitleEditor = useCallback(
+    (obj: BoardObject) => {
+      const x = Number.isFinite(obj.x) ? obj.x : 0;
+      const y = Number.isFinite(obj.y) ? obj.y : 0;
+      const w = Number.isFinite(obj.width) && obj.width > 0 ? obj.width : 200;
+      const { x: screenX, y: screenY } = worldToScreen(x, y - 22, viewport);
+      const screenWidth = Math.min(w * viewport.scaleX, 400);
+      setEditingObject({
+        id: obj.id,
+        x: Number.isFinite(screenX) ? screenX : 0,
+        y: Number.isFinite(screenY) ? screenY : 0,
+        width: Number.isFinite(screenWidth) && screenWidth > 0 ? screenWidth : 200,
+        height: 24 * viewport.scaleY,
+        text: obj.text || '',
+        objectType: 'frame',
       });
       setSelectedObjectIds([obj.id]);
       broadcastEditing(obj.id, obj.text ?? '');
@@ -507,9 +836,11 @@ export function Board() {
     (obj: BoardObject) => {
       if (obj.type === 'sticky' || obj.type === 'text') {
         openTextEditorForObject(obj);
+      } else if (obj.type === 'frame') {
+        openFrameTitleEditor(obj);
       }
     },
-    [openTextEditorForObject]
+    [openTextEditorForObject, openFrameTitleEditor]
   );
 
   const handleObjectRightClick = useCallback(
@@ -553,7 +884,9 @@ export function Board() {
         width: endX - startX,
         height: endY - startY,
         rotation: 0,
-        color: '#424242',
+        color: '#000000',
+        strokeColor: '#000000',
+        strokeWidth: 2,
         arrowType: 'none',
         waypoints,
         fromId: fromId || undefined,
@@ -577,7 +910,7 @@ export function Board() {
   );
 
   const handleShapeDrop = useCallback(
-    (shapeType: 'rectangle' | 'sticky' | 'text' | 'circle' | 'line' | 'arrow-single' | 'arrow-double' | 'triangle' | 'star', screenX: number, screenY: number) => {
+    (shapeType: 'rectangle' | 'sticky' | 'text' | 'circle' | 'line' | 'arrow-single' | 'arrow-double' | 'triangle' | 'star' | 'frame', screenX: number, screenY: number) => {
       if (!user) {
         console.error('❌ No user found - cannot create object');
         return;
@@ -594,6 +927,9 @@ export function Board() {
         y: Math.max(-CLAMP, Math.min(CLAMP, worldPos.y)),
       };
 
+      const dropFrame = shapeType !== 'frame' ? getFrameContainingPoint(worldPos.x, worldPos.y) : null;
+      const dropFrameId = dropFrame?.id;
+
       const id = generateId();
       let newObject: BoardObject;
 
@@ -609,7 +945,9 @@ export function Board() {
           height: noteHeight,
           rotation: 0,
           text: '',
-          color: '#FFD54F',
+          color: '#FFD700',
+          strokeWidth: 0,
+          ...(dropFrameId && { frameId: dropFrameId }),
           createdBy: user.uid,
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -628,6 +966,8 @@ export function Board() {
           rotation: 0,
           text: '',
           color: 'transparent',
+          strokeWidth: 0,
+          ...(dropFrameId && { frameId: dropFrameId }),
           createdBy: user.uid,
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -643,7 +983,11 @@ export function Board() {
           width: circleSize,
           height: circleSize,
           rotation: 0,
-          color: '#CE93D8',
+          color: '#FFFFFF',
+          strokeColor: '#000000',
+          strokeWidth: 2,
+          aspectRatio: 1,
+          ...(dropFrameId && { frameId: dropFrameId }),
           createdBy: user.uid,
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -659,9 +1003,12 @@ export function Board() {
           width: lineWidth,
           height: 0,
           rotation: 0,
-          color: '#424242',
+          color: '#000000',
+          strokeColor: '#000000',
+          strokeWidth: 2,
           arrowType: shapeType === 'arrow-single' ? 'single' : shapeType === 'arrow-double' ? 'double' : 'none',
           waypoints: [],
+          ...(dropFrameId && { frameId: dropFrameId }),
           createdBy: user.uid,
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -678,7 +1025,11 @@ export function Board() {
           width: triWidth,
           height: triHeight,
           rotation: 0,
-          color: '#81C784',
+          color: '#FFFFFF',
+          strokeColor: '#000000',
+          strokeWidth: 2,
+          aspectRatio: triWidth / triHeight,
+          ...(dropFrameId && { frameId: dropFrameId }),
           createdBy: user.uid,
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -694,7 +1045,30 @@ export function Board() {
           width: starSize,
           height: starSize,
           rotation: 0,
-          color: '#FFB74D',
+          color: '#FFFFFF',
+          strokeColor: '#000000',
+          strokeWidth: 2,
+          aspectRatio: 1,
+          ...(dropFrameId && { frameId: dropFrameId }),
+          createdBy: user.uid,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          updatedBy: user.uid,
+        };
+      } else if (shapeType === 'frame') {
+        const frameWidth = 300;
+        const frameHeight = 200;
+        const existingFrameCount = objects.filter(o => o.type === 'frame').length;
+        newObject = {
+          id,
+          type: 'frame',
+          x: worldPos.x - frameWidth / 2,
+          y: worldPos.y - frameHeight / 2,
+          width: frameWidth,
+          height: frameHeight,
+          rotation: 0,
+          text: `Frame ${existingFrameCount + 1}`,
+          color: '#3366ff',
           createdBy: user.uid,
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -711,7 +1085,11 @@ export function Board() {
           width: rectWidth,
           height: rectHeight,
           rotation: 0,
-          color: '#90CAF9',
+          color: '#FFFFFF',
+          strokeColor: '#000000',
+          strokeWidth: 2,
+          aspectRatio: rectWidth / rectHeight,
+          ...(dropFrameId && { frameId: dropFrameId }),
           createdBy: user.uid,
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -724,12 +1102,19 @@ export function Board() {
           console.log(`✅ ${shapeType} added via drag-and-drop`);
           setSelectedObjectIds([id]);
           pushAction({ type: 'add', objects: [newObject] });
+          if (shapeType === 'frame') {
+            const contained = detectShapesInFrame(newObject, objects);
+            contained.forEach((o) => {
+              pushAction({ type: 'update', changes: [{ id: o.id, before: { frameId: o.frameId }, after: { frameId: newObject.id } }] });
+              updateObject(o.id, { frameId: newObject.id });
+            });
+          }
         })
         .catch((err) => {
           console.error(`❌ Failed to add ${shapeType}:`, err);
         });
     },
-    [addObject, user, pushAction]
+    [addObject, user, pushAction, objects, getFrameContainingPoint, detectShapesInFrame, updateObject]
   );
 
   const handleCanvasDragOver = useCallback((e: React.DragEvent) => {
@@ -754,7 +1139,7 @@ export function Board() {
       const now = Date.now();
       if (now - lastDropHandledAtRef.current < 300) return;
       lastDropHandledAtRef.current = now;
-      const shapeType = e.dataTransfer.getData('shape-type') as 'rectangle' | 'sticky' | 'text' | 'circle' | 'line' | 'arrow-single' | 'arrow-double' | 'triangle' | 'star';
+      const shapeType = e.dataTransfer.getData('shape-type') as 'rectangle' | 'sticky' | 'text' | 'circle' | 'line' | 'arrow-single' | 'arrow-double' | 'triangle' | 'star' | 'frame';
       if (shapeType && canvasContainerRef.current) {
         const rect = canvasContainerRef.current.getBoundingClientRect();
         const x = e.clientX - rect.left;
@@ -771,12 +1156,10 @@ export function Board() {
       if (selectedObjectIds.length === 1) {
         handleObjectUpdate(selectedObjectIds[0], updates);
       } else {
-        // Multi-select: apply color to all selected shapes
-        if ('color' in updates && updates.color !== undefined) {
-          handleBatchObjectUpdate(
-            selectedObjectIds.map((id) => ({ id, updates: { color: updates.color! } }))
-          );
-        }
+        // Multi-select: apply all updates to all selected objects
+        handleBatchObjectUpdate(
+          selectedObjectIds.map((id) => ({ id, updates }))
+        );
       }
     },
     [selectedObjectIds, handleObjectUpdate, handleBatchObjectUpdate]
@@ -838,25 +1221,40 @@ export function Board() {
         e.preventDefault();
         duplicateSelectedObjects();
       }
-      if (e.key === 'n' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      if (e.key === 'b' && (e.metaKey || e.ctrlKey) && selectedObjectIds.length > 0) {
         e.preventDefault();
-        createObjectAtCenter('sticky');
+        const obj = objects.find((o) => o.id === selectedObjectIds[0]);
+        if (obj && (obj.type === 'sticky' || obj.type === 'text')) {
+          handleSelectedObjectUpdate({ bold: !obj.bold });
+        }
       }
-      if (e.key === 't' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      if (e.key === 'i' && (e.metaKey || e.ctrlKey) && selectedObjectIds.length > 0) {
         e.preventDefault();
-        createObjectAtCenter('text');
+        const obj = objects.find((o) => o.id === selectedObjectIds[0]);
+        if (obj && (obj.type === 'sticky' || obj.type === 'text')) {
+          handleSelectedObjectUpdate({ italic: !obj.italic });
+        }
+      }
+      if (e.key === 'u' && (e.metaKey || e.ctrlKey) && selectedObjectIds.length > 0) {
+        e.preventDefault();
+        const obj = objects.find((o) => o.id === selectedObjectIds[0]);
+        if (obj && (obj.type === 'sticky' || obj.type === 'text')) {
+          handleSelectedObjectUpdate({ underline: !obj.underline });
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
     editingObject,
-    selectedObjectIds.length,
+    selectedObjectIds,
+    objects,
     selectAll,
     handleCopySelected,
     handleCutSelected,
     handlePaste,
     handleDeleteSelected,
+    handleSelectedObjectUpdate,
     duplicateSelectedObjects,
     undo,
     redo,
@@ -949,10 +1347,21 @@ export function Board() {
               onBroadcastTransform={broadcastTransform}
               onClearTransform={clearTransform}
               onConnectShapes={handleConnectShapes}
-              isDraggingShapeFromSidebar={isDraggingShapeFromSidebar}
               onDragStart={markDragging}
               onDragEnd={unmarkDragging}
+              isDraggingShapeFromSidebar={isDraggingShapeFromSidebar}
             />
+        {selectedObject && (
+          <StyleBar
+            key={selectedObjectIds.join(',')}
+            selectedObject={selectedObject}
+            selectedCount={selectedObjectIds.length}
+            onUpdate={handleSelectedObjectUpdate}
+            onDelete={handleDeleteSelected}
+            liveTransform={liveTransform}
+            viewport={viewport}
+          />
+        )}
         {contextMenu && (
           <ContextMenu
             x={contextMenu.x}
@@ -964,7 +1373,12 @@ export function Board() {
                     openTextEditorForObject(contextMenuObject);
                     setContextMenu(null);
                   }
-                : undefined
+                : contextMenuObject && contextMenuObject.type === 'frame'
+                  ? () => {
+                      openFrameTitleEditor(contextMenuObject);
+                      setContextMenu(null);
+                    }
+                  : undefined
             }
             onCopy={handleCopySelected}
             onCut={handleCutSelected}
@@ -980,47 +1394,68 @@ export function Board() {
             onClose={() => setContextMenu(null)}
           />
         )}
-        {editingObject && (
-          <TextEditor
-            x={editingObject.x}
-            y={editingObject.y}
-            width={editingObject.width}
-            height={editingObject.height}
-            text={editingObject.text}
-            color={editingObject.objectType === 'text' ? 'transparent' : objects.find(obj => obj.id === editingObject.id)?.color}
-            objectType={editingObject.objectType}
-            onSubmit={handleTextSubmit}
-            onCancel={() => {
-              clearEditing();
-              setEditingObject(null);
-            }}
-            onTextChange={(text) => editingObject && broadcastEditing(editingObject.id, text)}
-          />
-        )}
+        {editingObject && (() => {
+          const editObj = objects.find(obj => obj.id === editingObject.id);
+          return (
+            <TextEditor
+              x={editingObject.x}
+              y={editingObject.y}
+              width={editingObject.width}
+              height={editingObject.height}
+              text={editingObject.text}
+              color={editingObject.objectType === 'text' ? 'transparent' : editObj?.color}
+              textColor={editObj?.textColor}
+              objectType={editingObject.objectType}
+              fontSize={editObj?.fontSize}
+              fontFamily={editObj?.fontFamily}
+              bold={editObj?.bold}
+              italic={editObj?.italic}
+              underline={editObj?.underline}
+              onSubmit={handleTextSubmit}
+              onCancel={() => {
+                clearEditing();
+                setEditingObject(null);
+              }}
+              onTextChange={(text) => editingObject && broadcastEditing(editingObject.id, text)}
+            />
+          );
+        })()}
           </div>
         </div>
-        {selectedObject && !stylePanelOpen && (
-          <button
-            type="button"
-            className="style-panel-tab"
-            onClick={() => setStylePanelOpen(true)}
-            aria-label="Open style panel"
-            data-testid="style-panel-tab"
-          >
-            <span className="style-panel-tab-arrow" aria-hidden>‹</span>
-          </button>
-        )}
-        {selectedObject && stylePanelOpen && (
-          <StylePanel
-            key={selectedObjectIds.join(',')}
-            selectedObject={selectedObject}
-            selectedCount={selectedObjectIds.length}
-            onUpdate={handleSelectedObjectUpdate}
-            liveTransform={liveTransform}
-            onCollapse={() => setStylePanelOpen(false)}
-          />
-        )}
       </div>
+      {deleteFrameConfirm && (
+        <div className="delete-frame-confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="delete-frame-confirm-title">
+          <div className="delete-frame-confirm-box">
+            <h2 id="delete-frame-confirm-title" className="delete-frame-confirm-title">
+              Delete frame and {deleteFrameConfirm.childCount} shape(s)?
+            </h2>
+            <p className="delete-frame-confirm-desc">Shapes inside the frame can be deleted or kept on the board.</p>
+            <div className="delete-frame-confirm-actions">
+              <button
+                type="button"
+                className="delete-frame-confirm-btn delete-frame-confirm-delete-all"
+                onClick={() => handleDeleteFrameConfirm('deleteAll')}
+              >
+                Delete all
+              </button>
+              <button
+                type="button"
+                className="delete-frame-confirm-btn delete-frame-confirm-keep"
+                onClick={() => handleDeleteFrameConfirm('keepShapes')}
+              >
+                Keep shapes
+              </button>
+              <button
+                type="button"
+                className="delete-frame-confirm-btn delete-frame-confirm-cancel"
+                onClick={() => handleDeleteFrameConfirm('cancel')}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
