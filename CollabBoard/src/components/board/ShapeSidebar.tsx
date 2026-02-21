@@ -9,6 +9,10 @@ interface ShapeSidebarProps {
   /** Controlled open state for the shapes submenu (e.g. close when canvas is clicked) */
   shapesPanelOpen?: boolean;
   onShapesPanelOpenChange?: (open: boolean) => void;
+  /** Current canvas interaction mode */
+  canvasMode?: 'cursor' | 'grab';
+  /** Called when the user clicks a mode button */
+  onCanvasModeChange?: (mode: 'cursor' | 'grab') => void;
 }
 
 /** Icon-only sticky note (folded corner) for left bar */
@@ -98,6 +102,23 @@ const FramePanelIcon = () => (
   </svg>
 );
 
+/** Arrow cursor icon for select mode */
+const CursorIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 4l7.07 17 2.51-7.39L21 11.07z" fill="currentColor" stroke="currentColor" />
+  </svg>
+);
+
+/** Hand/grab icon for pan mode */
+const HandIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M18 11V6a2 2 0 00-4 0v1" />
+    <path d="M14 10V4a2 2 0 00-4 0v6" />
+    <path d="M10 10.5V6a2 2 0 00-4 0v8" />
+    <path d="M18 8a2 2 0 014 0v7a8 8 0 01-8 8h-2c-2.5 0-4-1-5.5-3L4 16" />
+  </svg>
+);
+
 interface TooltipButtonProps {
   label: string;
   shortcut?: string;
@@ -170,6 +191,8 @@ export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({
   onDragStateChange,
   shapesPanelOpen: shapesPanelOpenProp,
   onShapesPanelOpenChange,
+  canvasMode = 'cursor',
+  onCanvasModeChange,
 }) => {
   const didDragRef = useRef(false);
   const [shapesPanelOpenInternal, setShapesPanelOpenInternal] = useState(false);
@@ -212,6 +235,29 @@ export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({
   return (
     <div className="shape-sidebar" data-testid="shape-sidebar" role="group" aria-label="Shape tools">
       <div className="shape-sidebar-tools">
+        {/* Mode buttons */}
+        <TooltipButton
+          label="Select"
+          shortcut="V"
+          icon={<CursorIcon />}
+          onClick={() => onCanvasModeChange?.('cursor')}
+          data-testid="tool-cursor"
+          aria-label="Select"
+          active={canvasMode === 'cursor'}
+        />
+        <TooltipButton
+          label="Hand"
+          shortcut="H"
+          icon={<HandIcon />}
+          onClick={() => onCanvasModeChange?.('grab')}
+          data-testid="tool-hand"
+          aria-label="Hand"
+          active={canvasMode === 'grab'}
+        />
+
+        {/* Divider between mode tools and shape tools */}
+        <div className="shape-sidebar-divider" />
+
         {/* Sticky note */}
         <TooltipButton
           label="Sticky note"

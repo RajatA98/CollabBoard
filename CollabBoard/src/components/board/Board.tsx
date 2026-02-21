@@ -67,6 +67,7 @@ export function Board() {
   } | null>(null);
   const [shapesPanelOpen, setShapesPanelOpen] = useState(false);
   const [isDraggingShapeFromSidebar, setIsDraggingShapeFromSidebar] = useState(false);
+  const [canvasMode, setCanvasMode] = useState<'cursor' | 'grab'>('cursor');
   const [boardMeta, setBoardMeta] = useState<BoardMeta | null>(null);
   const [deleteFrameConfirm, setDeleteFrameConfirm] = useState<{
     selectedIds: string[];
@@ -1275,6 +1276,16 @@ export function Board() {
           active.tagName === 'SELECT' ||
           (active as HTMLElement).isContentEditable);
       if (isEditingInput) return;
+      // Tool mode shortcuts (V for cursor, H for hand/grab)
+      if (e.key === 'v' && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+        setCanvasMode('cursor');
+        return;
+      }
+      if (e.key === 'h' && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+        setCanvasMode('grab');
+        setSelectedObjectIds([]);
+        return;
+      }
       if (e.key === 'a' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         selectAll();
@@ -1382,6 +1393,8 @@ export function Board() {
           onDragStateChange={setIsDraggingShapeFromSidebar}
           shapesPanelOpen={shapesPanelOpen}
           onShapesPanelOpenChange={setShapesPanelOpen}
+          canvasMode={canvasMode}
+          onCanvasModeChange={setCanvasMode}
         />
         <div className="board-main">
           <UndoRedoClearPanel
@@ -1465,6 +1478,7 @@ export function Board() {
               onConnectShapes={handleConnectShapes}
               onDragStart={markDragging}
               onDragEnd={unmarkDragging}
+              canvasMode={canvasMode}
               isDraggingShapeFromSidebar={isDraggingShapeFromSidebar}
             />
         {selectedObject && (
