@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../firebase/config';
-import { signIn, signUp, signOut } from '../firebase/auth';
+import { signIn, signUp, signInWithGoogle, signOut } from '../firebase/auth';
 import type { AppUser } from '../types';
 
 function getAuthErrorMessage(err: unknown, fallback: string) {
@@ -19,6 +19,8 @@ function getAuthErrorMessage(err: unknown, fallback: string) {
     case 'auth/wrong-password':
     case 'auth/user-not-found':
       return 'Invalid email or password.';
+    case 'auth/popup-blocked':
+      return 'Popup was blocked by the browser. Please allow popups and try again.';
     default:
       return anyErr?.message ?? fallback;
   }
@@ -71,6 +73,22 @@ export function useAuth() {
     }
   }, []);
 
+  const loginWithGoogle = useCallback(async () => {
+    setError(null);
+    try {
+      await signInWithGoogle();
+      return true;
+    } catch (err) {
+      const anyErr = err as { code?: string };
+      if (anyErr?.code === 'auth/popup-closed-by-user') {
+        return false;
+      }
+      const message = getAuthErrorMessage(err, 'Google sign-in failed');
+      setError(message);
+      return false;
+    }
+  }, []);
+
   const logout = useCallback(async () => {
     setError(null);
     try {
@@ -81,5 +99,5 @@ export function useAuth() {
     }
   }, []);
 
-  return { user, loading, error, clearError, login, signup, logout };
+  return { user, loading, error, clearError, login, signup, loginWithGoogle, logout };
 }

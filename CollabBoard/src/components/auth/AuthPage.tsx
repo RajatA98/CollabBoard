@@ -8,7 +8,7 @@ export function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const navigate = useNavigate();
-  const { user, loading, login, signup, error, clearError } = useAuth();
+  const { user, loading, login, signup, loginWithGoogle, error, clearError } = useAuth();
 
   if (loading) {
     return <div className="loading">Loading...</div>;
@@ -46,6 +46,14 @@ export function AuthPage() {
     return ok;
   };
 
+  const handleGoogleLogin = async () => {
+    const ok = await loginWithGoogle();
+    if (ok) {
+      navigate('/dashboard', { replace: true });
+    }
+    return ok;
+  };
+
   return (
     <div className="auth-page">
       <div className="auth-container">
@@ -53,6 +61,7 @@ export function AuthPage() {
         {isLogin ? (
           <LoginForm
             onLogin={handleLogin}
+            onGoogleLogin={handleGoogleLogin}
             onSwitchToSignup={switchToSignup}
             error={error}
             message={message}
@@ -60,6 +69,7 @@ export function AuthPage() {
         ) : (
           <SignupForm
             onSignup={handleSignup}
+            onGoogleLogin={handleGoogleLogin}
             onSwitchToLogin={switchToLogin}
             error={error}
           />
