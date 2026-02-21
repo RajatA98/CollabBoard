@@ -677,6 +677,13 @@ html, body, #root {
   padding: 10px 8px;
 }
 
+.shape-sidebar-divider {
+  width: 32px;
+  height: 1px;
+  background: rgba(0, 0, 0, 0.12);
+  margin: 2px auto;
+}
+
 .shape-bar-btn-wrap {
   position: relative;
   display: flex;
