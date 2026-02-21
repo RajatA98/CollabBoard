@@ -35,6 +35,7 @@ describe('AuthPage', () => {
       clearError: vi.fn(),
       login: vi.fn().mockResolvedValue(false),
       signup,
+      loginWithGoogle: vi.fn().mockResolvedValue(false),
       logout: vi.fn(),
     });
 
@@ -68,6 +69,7 @@ describe('AuthPage', () => {
       clearError: vi.fn(),
       login,
       signup: vi.fn().mockResolvedValue(false),
+      loginWithGoogle: vi.fn().mockResolvedValue(false),
       logout: vi.fn(),
     });
 
@@ -95,6 +97,7 @@ describe('AuthPage', () => {
       clearError: vi.fn(),
       login: vi.fn(),
       signup: vi.fn(),
+      loginWithGoogle: vi.fn(),
       logout: vi.fn(),
     });
 
@@ -108,6 +111,35 @@ describe('AuthPage', () => {
     expect(screen.queryByRole('heading', { name: /sign up/i })).not.toBeInTheDocument();
   });
 
+  it('navigates to dashboard on successful Google login', async () => {
+    const user = userEvent.setup();
+    const loginWithGoogle = vi.fn().mockResolvedValue(true);
+
+    mockUseAuth.mockReturnValue({
+      user: null,
+      loading: false,
+      error: null,
+      clearError: vi.fn(),
+      login: vi.fn().mockResolvedValue(false),
+      signup: vi.fn().mockResolvedValue(false),
+      loginWithGoogle,
+      logout: vi.fn(),
+    });
+
+    render(
+      <MemoryRouter>
+        <AuthPage />
+      </MemoryRouter>
+    );
+
+    await user.click(screen.getByRole('button', { name: /sign in with google/i }));
+
+    await waitFor(() => {
+      expect(loginWithGoogle).toHaveBeenCalled();
+      expect(navigateMock).toHaveBeenCalledWith('/dashboard', { replace: true });
+    });
+  });
+
   it('shows loading state while auth is initializing', () => {
     mockUseAuth.mockReturnValue({
       user: null,
@@ -116,6 +148,7 @@ describe('AuthPage', () => {
       clearError: vi.fn(),
       login: vi.fn(),
       signup: vi.fn(),
+      loginWithGoogle: vi.fn(),
       logout: vi.fn(),
     });
 
