@@ -284,6 +284,7 @@ export function Canvas({
   const drawingSnapRef = useRef<SnapCandidate | null>(null);
 
   const [isDraggingNode, setIsDraggingNode] = useState(false);
+  const [dropTargetFrameId, setDropTargetFrameId] = useState<string | null>(null);
 
   /** When multi-select: current visual position/size/rotation of each selected node (for ConnectionPoints and line overrides). */
   const multiSelectDisplayRef = useRef<Map<string, { x: number; y: number; width: number; height: number; rotation: number }>>(new Map());
@@ -888,18 +889,29 @@ export function Canvas({
     transformer.getLayer()?.batchDraw();
   }, [selectedObjectIds, objects]);
 
-  // Helper to create onDragMove handler for broadcasting
+  // Helper to create onDragMove handler for broadcasting + frame drop target detection
   const makeDragMoveHandler = useCallback(
     (obj: BoardObject) => (e: Konva.KonvaEventObject<DragEvent>) => {
       const node = e.target;
       handleObjectDragMove(obj.id, node.x(), node.y());
       onBroadcastTransform?.(obj.id, node.x(), node.y(), obj.width, obj.height, obj.rotation || 0);
+      // Detect if a non-frame shape is being dragged over a frame for drop target highlight
+      if (obj.type !== 'frame') {
+        const cx = node.x() + obj.width / 2;
+        const cy = node.y() + obj.height / 2;
+        const targetFrame = objects.find(
+          (o) => o.type === 'frame' && o.id !== obj.frameId &&
+            cx >= o.x && cx <= o.x + o.width && cy >= o.y && cy <= o.y + o.height
+        );
+        setDropTargetFrameId(targetFrame?.id ?? null);
+      }
     },
-    [onBroadcastTransform, handleObjectDragMove]
+    [onBroadcastTransform, handleObjectDragMove, objects]
   );
 
   const handleDragEndExtra = useCallback(() => {
     onClearTransform?.();
+    setDropTargetFrameId(null);
   }, [onClearTransform]);
 
   // ── Connected-line helpers ──────────────────────────────────────────────
@@ -1325,7 +1337,7 @@ export function Canvas({
               case 'line':
                 return <LineShape {...commonProps} object={displayObj} />;
               case 'frame':
-                return <Frame {...commonProps} />;
+                return <Frame {...commonProps} isDropTarget={dropTargetFrameId === obj.id} />;
               default:
                 return <Rectangle {...commonProps} />;
             }
@@ -1385,7 +1397,7 @@ export function Canvas({
                     case 'line':
                       return <LineShape {...selectedCommon} object={displayObject} />;
                     case 'frame':
-                      return <Frame {...selectedCommon} />;
+                      return <Frame {...selectedCommon} isDropTarget={dropTargetFrameId === obj.id} />;
                     default:
                       return <Rectangle {...selectedCommon} />;
                   }

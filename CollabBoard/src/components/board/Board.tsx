@@ -163,9 +163,16 @@ export function Board() {
           const childIds = objects.filter((o) => o.frameId === id).map((o) => o.id);
           newSelectedIds = [id, ...childIds];
         } else if (obj.frameId) {
-          const frameId = obj.frameId;
-          const childIds = objects.filter((o) => o.frameId === frameId).map((o) => o.id);
-          newSelectedIds = [frameId, ...childIds];
+          // Two-stage selection: if the parent frame is already selected (frame group is active),
+          // a second click on a child selects only that child for individual manipulation.
+          const frameAlreadySelected = selectedObjectIds.includes(obj.frameId);
+          if (frameAlreadySelected) {
+            newSelectedIds = [id];
+          } else {
+            const frameId = obj.frameId;
+            const childIds = objects.filter((o) => o.frameId === frameId).map((o) => o.id);
+            newSelectedIds = [frameId, ...childIds];
+          }
         } else {
           newSelectedIds = [id];
         }
@@ -401,6 +408,7 @@ export function Board() {
           const contained = objects.filter(
             (o) =>
               o.id !== newObject.id &&
+              o.type !== 'frame' &&
               o.x >= fx &&
               o.y >= fy &&
               (o.x + (o.width ?? 0)) <= fRight &&
@@ -587,7 +595,7 @@ export function Board() {
     ) ?? null;
   }, [objects]);
 
-  /** Return objects whose AABB is fully inside the frame bounds (excluding the frame itself). */
+  /** Return objects whose AABB is fully inside the frame bounds (excluding the frame itself and other frames). */
   const detectShapesInFrame = useCallback((frame: BoardObject, objectList: BoardObject[]) => {
     const fx = frame.x;
     const fy = frame.y;
@@ -596,6 +604,7 @@ export function Board() {
     return objectList.filter(
       (o) =>
         o.id !== frame.id &&
+        o.type !== 'frame' &&
         o.x >= fx &&
         o.y >= fy &&
         (o.x + (o.width ?? 0)) <= fRight &&
@@ -622,16 +631,6 @@ export function Board() {
     [objects]
   );
 
-  /** True if point (px, py) is inside frame's axis-aligned bounds (ignores frame rotation). */
-  const isPointInFrameBounds = useCallback((px: number, py: number, frame: BoardObject) => {
-    return (
-      px >= frame.x &&
-      px <= frame.x + frame.width &&
-      py >= frame.y &&
-      py <= frame.y + frame.height
-    );
-  }, []);
-
   const handleObjectUpdate = useCallback(
     (id: string, updates: Partial<BoardObject>) => {
       const obj = objects.find((o) => o.id === id);
@@ -642,7 +641,7 @@ export function Board() {
         pushAction({ type: 'update', changes: [{ id, before, after: updates }] });
       }
 
-      // When a frame is moved/resized/rotated, sync all contained shapes — batch into one Firestore write to reduce lag
+      // When a frame is moved/resized/rotated, sync all contained shapes
       if (obj?.type === 'frame') {
         const children = getShapesInFrame(id);
         if (children.length > 0) {
@@ -657,40 +656,68 @@ export function Board() {
           const oldH = obj.height;
           const oldRot = obj.rotation ?? 0;
 
-          const scaleX = oldW > 0 ? newW / oldW : 1;
-          const scaleY = oldH > 0 ? newH / oldH : 1;
+          const sizeChanged = newW !== oldW || newH !== oldH;
           const rotDelta = newRot - oldRot;
 
           const childChanges: Array<{ objectId: string; updates: Partial<BoardObject> }> = [];
-          for (const child of children) {
-            const relX = child.x - oldX;
-            const relY = child.y - oldY;
-            const newChildX = newX + relX * scaleX;
-            const newChildY = newY + relY * scaleY;
-            const newChildW = Math.max(20, child.width * scaleX);
-            const newChildH = Math.max(20, child.height * scaleY);
-            const newChildRot = (child.rotation ?? 0) + rotDelta;
 
-            childChanges.push({
-              objectId: child.id,
-              updates: {
-                x: newChildX,
-                y: newChildY,
-                width: newChildW,
-                height: newChildH,
-                rotation: newChildRot,
-              },
-            });
+          if (!sizeChanged) {
+            // Frame MOVED (no resize) — translate children by the same delta
+            const dx = newX - oldX;
+            const dy = newY - oldY;
+            if (dx !== 0 || dy !== 0 || rotDelta !== 0) {
+              for (const child of children) {
+                childChanges.push({
+                  objectId: child.id,
+                  updates: {
+                    x: child.x + dx,
+                    y: child.y + dy,
+                    rotation: (child.rotation ?? 0) + rotDelta,
+                  },
+                });
+              }
+            }
+          } else {
+            // Frame RESIZED — only scale children proportionally when frame shrinks
+            const rawScaleX = oldW > 0 ? newW / oldW : 1;
+            const rawScaleY = oldH > 0 ? newH / oldH : 1;
+            const isShrinking = rawScaleX < 1 || rawScaleY < 1;
+
+            if (isShrinking) {
+              // Apply scaling only on shrinking axes; growing axes use 1 (children stay put on that axis)
+              const scaleX = Math.min(rawScaleX, 1);
+              const scaleY = Math.min(rawScaleY, 1);
+              for (const child of children) {
+                const relX = child.x - oldX;
+                const relY = child.y - oldY;
+                childChanges.push({
+                  objectId: child.id,
+                  updates: {
+                    x: newX + relX * scaleX,
+                    y: newY + relY * scaleY,
+                    width: Math.max(20, child.width * scaleX),
+                    height: Math.max(20, child.height * scaleY),
+                    rotation: (child.rotation ?? 0) + rotDelta,
+                  },
+                });
+              }
+            }
+            // When frame grows, children stay at their positions/sizes — no childChanges needed
           }
-          pushAction({
-            type: 'update',
-            changes: childChanges.map(({ objectId: cid, updates: u }) => {
-              const c = objects.find((o) => o.id === cid);
-              const before = c ? Object.fromEntries((Object.keys(u) as (keyof BoardObject)[]).map((k) => [k, c[k]])) as Partial<BoardObject> : {};
-              return { id: cid, before, after: u };
-            }),
-          });
-          batchUpdateObjects([{ objectId: id, updates }, ...childChanges]);
+
+          if (childChanges.length > 0) {
+            pushAction({
+              type: 'update',
+              changes: childChanges.map(({ objectId: cid, updates: u }) => {
+                const c = objects.find((o) => o.id === cid);
+                const before = c ? Object.fromEntries((Object.keys(u) as (keyof BoardObject)[]).map((k) => [k, c[k]])) as Partial<BoardObject> : {};
+                return { id: cid, before, after: u };
+              }),
+            });
+            batchUpdateObjects([{ objectId: id, updates }, ...childChanges]);
+          } else {
+            updateObject(id, updates);
+          }
           return;
         }
       }
@@ -710,25 +737,27 @@ export function Board() {
             updateObject(id, { frameId: containing.id });
           }
         } else if (obj.frameId !== undefined) {
+          // Use AABB check consistent with enter: shape must be fully inside to stay
           const frame = objects.find((o) => o.type === 'frame' && o.id === obj.frameId);
-          const centerX = newX + newW / 2;
-          const centerY = newY + newH / 2;
-          const stillInsideFrame = frame && isPointInFrameBounds(centerX, centerY, frame);
-          if (!stillInsideFrame) {
+          const stillFullyInside = frame &&
+            newX >= frame.x && newY >= frame.y &&
+            newX + newW <= frame.x + frame.width && newY + newH <= frame.y + frame.height;
+          if (!stillFullyInside) {
             pushAction({ type: 'update', changes: [{ id, before: { frameId: obj.frameId }, after: { frameId: undefined } }] });
             updateObject(id, { frameId: undefined });
           }
         }
       }
     },
-    [objects, updateObject, batchUpdateObjects, pushAction, getShapesInFrame, getFrameContainingRect, isPointInFrameBounds]
+    [objects, updateObject, batchUpdateObjects, pushAction, getShapesInFrame, getFrameContainingRect]
   );
 
   const handleBatchObjectUpdate = useCallback(
     (changes: { id: string; updates: Partial<BoardObject> }[]) => {
       if (changes.length === 0) return;
 
-      // When a frame is resized/moved in a multi-select, scale its children proportionally (same as single-frame resize)
+      // When a frame is moved/resized in a multi-select, sync its children:
+      // Move = translate children, Shrink = scale proportionally, Grow = children stay put
       const resolvedChanges = [...changes];
 
       for (const { id, updates: ups } of changes) {
@@ -747,29 +776,50 @@ export function Board() {
         const oldW = obj.width;
         const oldH = obj.height;
         const oldRot = obj.rotation ?? 0;
-        const scaleX = oldW > 0 ? newW / oldW : 1;
-        const scaleY = oldH > 0 ? newH / oldH : 1;
         const rotDelta = newRot - oldRot;
+        const sizeChanged = newW !== oldW || newH !== oldH;
 
         const children = getShapesInFrame(id);
-        for (const child of children) {
-          const relX = child.x - oldX;
-          const relY = child.y - oldY;
-          const newChildX = newX + relX * scaleX;
-          const newChildY = newY + relY * scaleY;
-          const newChildW = Math.max(child.type === 'line' ? 0 : 20, child.width * scaleX);
-          const newChildH = Math.max(child.type === 'line' ? 0 : 20, child.height * scaleY);
-          const newChildRot = (child.rotation ?? 0) + rotDelta;
-          const childUpdates: Partial<BoardObject> = {
-            x: newChildX,
-            y: newChildY,
-            width: newChildW,
-            height: newChildH,
-            rotation: newChildRot,
-          };
-          const idx = resolvedChanges.findIndex((c) => c.id === child.id);
-          if (idx >= 0) resolvedChanges[idx] = { id: child.id, updates: childUpdates };
-          else resolvedChanges.push({ id: child.id, updates: childUpdates });
+        if (!sizeChanged) {
+          // Frame MOVED — translate children
+          const dx = newX - oldX;
+          const dy = newY - oldY;
+          if (dx !== 0 || dy !== 0 || rotDelta !== 0) {
+            for (const child of children) {
+              const childUpdates: Partial<BoardObject> = {
+                x: child.x + dx,
+                y: child.y + dy,
+                rotation: (child.rotation ?? 0) + rotDelta,
+              };
+              const idx = resolvedChanges.findIndex((c) => c.id === child.id);
+              if (idx >= 0) resolvedChanges[idx] = { id: child.id, updates: childUpdates };
+              else resolvedChanges.push({ id: child.id, updates: childUpdates });
+            }
+          }
+        } else {
+          // Frame RESIZED — only scale on shrinking axes
+          const rawScaleX = oldW > 0 ? newW / oldW : 1;
+          const rawScaleY = oldH > 0 ? newH / oldH : 1;
+          const isShrinking = rawScaleX < 1 || rawScaleY < 1;
+          if (isShrinking) {
+            const scaleX = Math.min(rawScaleX, 1);
+            const scaleY = Math.min(rawScaleY, 1);
+            for (const child of children) {
+              const relX = child.x - oldX;
+              const relY = child.y - oldY;
+              const childUpdates: Partial<BoardObject> = {
+                x: newX + relX * scaleX,
+                y: newY + relY * scaleY,
+                width: Math.max(child.type === 'line' ? 0 : 20, child.width * scaleX),
+                height: Math.max(child.type === 'line' ? 0 : 20, child.height * scaleY),
+                rotation: (child.rotation ?? 0) + rotDelta,
+              };
+              const idx = resolvedChanges.findIndex((c) => c.id === child.id);
+              if (idx >= 0) resolvedChanges[idx] = { id: child.id, updates: childUpdates };
+              else resolvedChanges.push({ id: child.id, updates: childUpdates });
+            }
+          }
+          // When frame grows, children stay at their positions — no child changes needed
         }
       }
 
@@ -801,18 +851,19 @@ export function Board() {
           pushAction({ type: 'update', changes: [{ id, before: { frameId: obj.frameId }, after: { frameId: containing.id } }] });
           updateObject(id, { frameId: containing.id });
         } else if (!containing && obj.frameId !== undefined) {
+          // Use AABB check consistent with enter: shape must be fully inside to stay
           const frame = objects.find((o) => o.type === 'frame' && o.id === obj.frameId);
-          const centerX = newX + newW / 2;
-          const centerY = newY + newH / 2;
-          const stillInsideFrame = frame && isPointInFrameBounds(centerX, centerY, frame);
-          if (!stillInsideFrame) {
+          const stillFullyInside = frame &&
+            newX >= frame.x && newY >= frame.y &&
+            newX + newW <= frame.x + frame.width && newY + newH <= frame.y + frame.height;
+          if (!stillFullyInside) {
             pushAction({ type: 'update', changes: [{ id, before: { frameId: obj.frameId }, after: { frameId: undefined } }] });
             updateObject(id, { frameId: undefined });
           }
         }
       });
     },
-    [objects, updateObject, batchUpdateObjects, pushAction, getShapesInFrame, getFrameContainingRect, isPointInFrameBounds]
+    [objects, updateObject, batchUpdateObjects, pushAction, getShapesInFrame, getFrameContainingRect]
   );
 
   const handleObjectDelete = useCallback(

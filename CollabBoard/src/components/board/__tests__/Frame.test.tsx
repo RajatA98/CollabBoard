@@ -104,6 +104,23 @@ describe('Frame', () => {
     expect(titleText).toBeTruthy();
   });
 
+  it('should show green drop target highlight when isDropTarget is true', () => {
+    render(<Frame object={mockFrame} isSelected={false} isDropTarget={true} onSelect={vi.fn()} onUpdate={vi.fn()} />);
+    const rects = screen.getAllByTestId('frame-rect');
+    const bgRect = rects.find(r => r.getAttribute('data-fill') === 'rgba(34, 204, 102, 0.08)');
+    expect(bgRect).toBeTruthy();
+    const borderRect = rects.find(r => r.getAttribute('data-stroke') === '#22cc66');
+    expect(borderRect).toBeTruthy();
+    expect(borderRect).toHaveAttribute('data-strokewidth', '3');
+  });
+
+  it('should not show drop target highlight when isDropTarget is false', () => {
+    render(<Frame object={mockFrame} isSelected={false} isDropTarget={false} onSelect={vi.fn()} onUpdate={vi.fn()} />);
+    const rects = screen.getAllByTestId('frame-rect');
+    const dropTargetBg = rects.find(r => r.getAttribute('data-fill') === 'rgba(34, 204, 102, 0.08)');
+    expect(dropTargetBg).toBeFalsy();
+  });
+
   it('should show remote transform overlay when remoteTransform is provided', () => {
     const remoteTransform = {
       objectId: 'frame-1',
