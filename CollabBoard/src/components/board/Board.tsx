@@ -5,10 +5,10 @@ import { Canvas } from './Canvas';
 import { TextEditor } from './TextEditor';
 import { PresenceBar } from './PresenceBar';
 import { ShapeSidebar } from './ShapeSidebar';
-import { AICommandPanel } from './AICommandPanel';
 import { UndoRedoClearPanel } from './UndoRedoClearPanel';
 import { StyleBar } from './StyleBar';
 import { ContextMenu } from './ContextMenu';
+import { AICommandPanel } from './AICommandPanel';
 import { useAuth } from '../../hooks/useAuth';
 import { useBoardObjects } from '../../hooks/useBoardObjects';
 import { useCursors } from '../../hooks/useCursors';
@@ -66,7 +66,6 @@ export function Board() {
     objectType: 'sticky' | 'text' | 'frame';
   } | null>(null);
   const [shapesPanelOpen, setShapesPanelOpen] = useState(false);
-  const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [isDraggingShapeFromSidebar, setIsDraggingShapeFromSidebar] = useState(false);
   const [boardMeta, setBoardMeta] = useState<BoardMeta | null>(null);
   const [deleteFrameConfirm, setDeleteFrameConfirm] = useState<{
@@ -74,6 +73,7 @@ export function Board() {
     frameIds: Set<string>;
     childCount: number;
   } | null>(null);
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef(viewport);
   viewportRef.current = viewport;
@@ -119,33 +119,60 @@ export function Board() {
     return () => container.removeEventListener('pointermove', handlePointerMove);
   }, [updateCursor]);
 
+  const bumpZIndex = useCallback(
+    (ids: string[]) => {
+      if (ids.length === 0) return;
+      const nonFrames = ids
+        .map((id) => objects.find((o) => o.id === id))
+        .filter((o): o is typeof objects[number] => !!o && o.type !== 'frame');
+      if (nonFrames.length === 0) return;
+      const maxZ = objects.reduce((max, o) => Math.max(max, o.zIndex ?? 0), 0);
+      // Sort by current zIndex so relative stacking order is preserved after bump
+      const sorted = [...nonFrames].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+      const alreadyOnTop = sorted.every((o, i) => (o.zIndex ?? 0) >= maxZ + 1 + i);
+      if (alreadyOnTop) return;
+      sorted.forEach((obj, i) => {
+        updateObject(obj.id, { zIndex: maxZ + 1 + i });
+      });
+    },
+    [objects, updateObject]
+  );
+
+  const setSelectedWithZBump = useCallback(
+    (ids: string[]) => {
+      setSelectedObjectIds(ids);
+      bumpZIndex(ids);
+    },
+    [bumpZIndex]
+  );
+
   const selectObject = useCallback(
     (id: string, additive: boolean) => {
       if (remoteSelectionByObject[id]) return;
+      let newSelectedIds: string[];
       if (additive) {
-        setSelectedObjectIds((prev) =>
-          prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-        );
+        const prev = selectedObjectIds;
+        newSelectedIds = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
       } else {
         const obj = objects.find((o) => o.id === id);
         if (!obj) {
-          setSelectedObjectIds([id]);
+          setSelectedWithZBump([id]);
           return;
         }
-        // Treat frame group as one: clicking frame or any child selects frame + all its children (marquee transform logic)
         if (obj.type === 'frame') {
           const childIds = objects.filter((o) => o.frameId === id).map((o) => o.id);
-          setSelectedObjectIds([id, ...childIds]);
+          newSelectedIds = [id, ...childIds];
         } else if (obj.frameId) {
           const frameId = obj.frameId;
           const childIds = objects.filter((o) => o.frameId === frameId).map((o) => o.id);
-          setSelectedObjectIds([frameId, ...childIds]);
+          newSelectedIds = [frameId, ...childIds];
         } else {
-          setSelectedObjectIds([id]);
+          newSelectedIds = [id];
         }
       }
+      setSelectedWithZBump(newSelectedIds);
     },
-    [remoteSelectionByObject, objects]
+    [remoteSelectionByObject, objects, selectedObjectIds, setSelectedWithZBump]
   );
 
   const clearSelection = useCallback(() => {
@@ -316,12 +343,18 @@ export function Board() {
     } else if (type === 'frame') {
       const frameWidth = 300;
       const frameHeight = 200;
+      const FRAME_GAP = 40;
       const existingFrameCount = objects.filter(o => o.type === 'frame').length;
+      // Place new frames in a grid so they don't stack on top of each other
+      const col = existingFrameCount % 4;
+      const row = Math.floor(existingFrameCount / 4);
+      const frameX = worldCenterX - frameWidth / 2 + col * (frameWidth + FRAME_GAP);
+      const frameY = worldCenterY - frameHeight / 2 + row * (frameHeight + FRAME_GAP);
       newObject = {
         id,
         type: 'frame',
-        x: worldCenterX - (frameWidth / 2),
-        y: worldCenterY - (frameHeight / 2),
+        x: frameX,
+        y: frameY,
         width: frameWidth,
         height: frameHeight,
         rotation: 0,
@@ -694,7 +727,53 @@ export function Board() {
   const handleBatchObjectUpdate = useCallback(
     (changes: { id: string; updates: Partial<BoardObject> }[]) => {
       if (changes.length === 0) return;
-      const undoChanges = changes
+
+      // When a frame is resized/moved in a multi-select, scale its children proportionally (same as single-frame resize)
+      const resolvedChanges = [...changes];
+
+      for (const { id, updates: ups } of changes) {
+        const obj = objects.find((o) => o.id === id);
+        if (!obj || obj.type !== 'frame') continue;
+        const hasTransform = ups.x !== undefined || ups.y !== undefined || ups.width !== undefined || ups.height !== undefined || ups.rotation !== undefined;
+        if (!hasTransform) continue;
+
+        const newX = ups.x ?? obj.x;
+        const newY = ups.y ?? obj.y;
+        const newW = ups.width ?? obj.width;
+        const newH = ups.height ?? obj.height;
+        const newRot = ups.rotation ?? obj.rotation ?? 0;
+        const oldX = obj.x;
+        const oldY = obj.y;
+        const oldW = obj.width;
+        const oldH = obj.height;
+        const oldRot = obj.rotation ?? 0;
+        const scaleX = oldW > 0 ? newW / oldW : 1;
+        const scaleY = oldH > 0 ? newH / oldH : 1;
+        const rotDelta = newRot - oldRot;
+
+        const children = getShapesInFrame(id);
+        for (const child of children) {
+          const relX = child.x - oldX;
+          const relY = child.y - oldY;
+          const newChildX = newX + relX * scaleX;
+          const newChildY = newY + relY * scaleY;
+          const newChildW = Math.max(child.type === 'line' ? 0 : 20, child.width * scaleX);
+          const newChildH = Math.max(child.type === 'line' ? 0 : 20, child.height * scaleY);
+          const newChildRot = (child.rotation ?? 0) + rotDelta;
+          const childUpdates: Partial<BoardObject> = {
+            x: newChildX,
+            y: newChildY,
+            width: newChildW,
+            height: newChildH,
+            rotation: newChildRot,
+          };
+          const idx = resolvedChanges.findIndex((c) => c.id === child.id);
+          if (idx >= 0) resolvedChanges[idx] = { id: child.id, updates: childUpdates };
+          else resolvedChanges.push({ id: child.id, updates: childUpdates });
+        }
+      }
+
+      const undoChanges = resolvedChanges
         .map(({ id, updates: ups }) => {
           const obj = objects.find((o) => o.id === id);
           if (!obj) return null;
@@ -707,9 +786,9 @@ export function Board() {
       if (undoChanges.length > 0) {
         pushAction({ type: 'update', changes: undoChanges });
       }
-      changes.forEach(({ id, updates: ups }) => updateObject(id, ups));
+      batchUpdateObjects(resolvedChanges.map(({ id, updates: ups }) => ({ objectId: id, updates: ups })));
       // Frame containment for each moved object
-      changes.forEach(({ id, updates: ups }) => {
+      resolvedChanges.forEach(({ id, updates: ups }) => {
         const obj = objects.find((o) => o.id === id);
         if (!obj || obj.type === 'frame') return;
         if (ups.x === undefined && ups.y === undefined && ups.width === undefined && ups.height === undefined) return;
@@ -733,7 +812,7 @@ export function Board() {
         }
       });
     },
-    [objects, updateObject, pushAction, getFrameContainingRect, isPointInFrameBounds]
+    [objects, updateObject, batchUpdateObjects, pushAction, getShapesInFrame, getFrameContainingRect, isPointInFrameBounds]
   );
 
   const handleObjectDelete = useCallback(
@@ -1294,10 +1373,7 @@ export function Board() {
           onDragStateChange={setIsDraggingShapeFromSidebar}
           shapesPanelOpen={shapesPanelOpen}
           onShapesPanelOpenChange={setShapesPanelOpen}
-          onAIClick={() => setAiPanelOpen((prev) => !prev)}
-          aiPanelOpen={aiPanelOpen}
         />
-        {aiPanelOpen && <AICommandPanel boardId={boardId} />}
         <div className="board-main">
           <UndoRedoClearPanel
             onUndo={undo}
@@ -1307,6 +1383,37 @@ export function Board() {
             onClear={handleClearBoard}
             clearDisabled={objects.length === 0}
           />
+          <button
+            type="button"
+            className="ai-fab"
+            onClick={() => setAiPanelOpen(true)}
+            aria-label="Open AI Assistant"
+            data-testid="ai-fab"
+          >
+            <span className="ai-fab-star" aria-hidden>
+              <svg viewBox="0 0 24 24" fill="currentColor" className="ai-fab-star-svg">
+                <path d="M12 2l2.4 7.4h7.6l-6 4.6 2.3 7-6.3-4.6L5.7 21l2.3-7-6-4.6h7.6L12 2z" />
+              </svg>
+            </span>
+          </button>
+          <div
+            className="ai-command-panel-overlay"
+            data-testid="ai-command-panel-overlay"
+            style={{ display: aiPanelOpen ? undefined : 'none' }}
+          >
+            <div className="ai-command-panel-backdrop" onClick={() => setAiPanelOpen(false)} aria-hidden />
+            <div className="ai-command-panel-wrap">
+              <AICommandPanel boardId={boardId} onClose={() => setAiPanelOpen(false)} />
+              <button
+                type="button"
+                className="ai-command-panel-close"
+                onClick={() => setAiPanelOpen(false)}
+                aria-label="Close AI Assistant"
+              >
+                ×
+              </button>
+            </div>
+          </div>
           <PresenceBar onlineUsers={onlineUsers} />
           <div
             ref={canvasContainerRef}
@@ -1336,7 +1443,7 @@ export function Board() {
               onSelectAll={selectAll}
               onDeleteSelected={handleDeleteSelected}
               onDuplicateSelected={duplicateSelectedObjects}
-              onSetSelectedIds={setSelectedObjectIds}
+              onSetSelectedIds={setSelectedWithZBump}
               viewport={viewport}
               setPosition={setPosition}
               zoomAtPoint={zoomAtPoint}

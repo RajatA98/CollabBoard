@@ -29,5 +29,10 @@ module.exports = {
     "quotes": ["error", "double"],
     "import/no-unresolved": 0,
     "indent": ["error", 2],
+    "require-jsdoc": "off",
+    "valid-jsdoc": "off",
+    "max-len": ["warn", {"code": 120, "ignoreStrings": true, "ignoreTemplateLiterals": true}],
+    "operator-linebreak": "off",
+    "block-spacing": "off",
   },
 };

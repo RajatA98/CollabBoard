@@ -38,6 +38,48 @@ export function rectsIntersect(r1: Rect, r2: Rect): boolean {
   );
 }
 
+const MAX_PLACEMENT_ATTEMPTS = 50;
+
+/**
+ * Find a non-overlapping top-left position for a rect of size (width, height).
+ * Tries desired (desiredX, desiredY) first, then positions to the right, down, left, up, then spiral outward.
+ * @param gap - spacing between rects (default 20)
+ * @returns Top-left { x, y } that does not intersect any existing rect
+ */
+export function getNonOverlappingPosition(
+  desiredX: number,
+  desiredY: number,
+  width: number,
+  height: number,
+  existingRects: Rect[],
+  gap: number = 20
+): { x: number; y: number } {
+  const step = Math.max(width, Math.max(1, height)) + gap;
+  const candidate: Rect = { x: 0, y: 0, width, height };
+
+  function overlapsAny(x: number, y: number): boolean {
+    candidate.x = x;
+    candidate.y = y;
+    return existingRects.some((r) => rectsIntersect(candidate, r));
+  }
+
+  if (!overlapsAny(desiredX, desiredY)) return { x: desiredX, y: desiredY };
+
+  for (let ring = 1; ring < MAX_PLACEMENT_ATTEMPTS; ring++) {
+    const S = ring * step;
+    const positions: [number, number][] = [
+      [desiredX + S, desiredY],
+      [desiredX, desiredY + S],
+      [desiredX - S, desiredY],
+      [desiredX, desiredY - S],
+    ];
+    for (const [x, y] of positions) {
+      if (!overlapsAny(x, y)) return { x, y };
+    }
+  }
+  return { x: desiredX, y: desiredY };
+}
+
 /**
  * Convert screen coordinates to world coordinates.
  * World Y increases downward (same as screen Y).

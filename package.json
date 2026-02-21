@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "update-chat-log": "node scripts/update-chat-log.js"
+  },
   "dependencies": {
     "firebase": "^12.9.0"
   }

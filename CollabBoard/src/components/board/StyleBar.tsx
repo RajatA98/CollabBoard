@@ -346,6 +346,10 @@ function DeleteButton({ onDelete }: { onDelete: () => void }) {
 const TOOLBAR_GAP = 24;
 const EDGE_PADDING = 8;
 const BAR_HEIGHT = 44;
+/** Extra upward offset for frame selection so the bar sits a bit higher above the frame. */
+const FRAME_EXTRA_OFFSET = 14;
+/** Default extra offset so the bar sits a few cm higher above the selection. */
+const DEFAULT_EXTRA_UP = 50;
 
 export function StyleBar({
   selectedObject,
@@ -380,10 +384,50 @@ export function StyleBar({
     const centerWorldY = safeY + (safeW / 2) * sinR + (safeH / 2) * cosR;
     const screenPt = worldToScreen(centerWorldX, centerWorldY, viewport);
     const halfScreenH = (safeH * viewport.scaleY) / 2;
+    const extraUp = selectedObject.type === 'frame' ? FRAME_EXTRA_OFFSET : 0;
     const left = Number.isFinite(screenPt.x) ? screenPt.x : 0;
-    const top = Number.isFinite(screenPt.y) ? Math.max(EDGE_PADDING, screenPt.y - halfScreenH - TOOLBAR_GAP - BAR_HEIGHT) : EDGE_PADDING;
+    const top = Number.isFinite(screenPt.y) ? Math.max(EDGE_PADDING, screenPt.y - halfScreenH - TOOLBAR_GAP - BAR_HEIGHT - extraUp - DEFAULT_EXTRA_UP) : EDGE_PADDING;
     return { left, top };
-  }, [safeX, safeY, safeW, safeH, safeRot, viewport]);
+  }, [safeX, safeY, safeW, safeH, safeRot, viewport, selectedObject.type]);
+
+  // Draggable offset (user can drag the bar; offset is relative to computed position)
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartRef = useRef<{ clientX: number; clientY: number; offsetX: number; offsetY: number } | null>(null);
+
+  useEffect(() => {
+    if (!isDragging) return;
+    const onMove = (e: MouseEvent) => {
+      const start = dragStartRef.current;
+      if (!start) return;
+      setDragOffset({
+        x: start.offsetX + (e.clientX - start.clientX),
+        y: start.offsetY + (e.clientY - start.clientY),
+      });
+    };
+    const onUp = () => {
+      dragStartRef.current = null;
+      setIsDragging(false);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [isDragging]);
+
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragStartRef.current = {
+      clientX: e.clientX,
+      clientY: e.clientY,
+      offsetX: dragOffset.x,
+      offsetY: dragOffset.y,
+    };
+    setIsDragging(true);
+  }, [dragOffset]);
 
   // Local editing state for numeric fields
   const [focusedField, setFocusedField] = useState<string | null>(null);
@@ -489,9 +533,26 @@ export function StyleBar({
     <div
       className="style-bar"
       data-testid="style-bar"
-      style={{ left: pos.left, top: pos.top }}
+      style={{ left: pos.left + dragOffset.x, top: pos.top + dragOffset.y }}
       onMouseDown={(e) => e.stopPropagation()}
     >
+      <div
+        className="sb-drag-handle"
+        onMouseDown={handleDragStart}
+        title="Drag to move"
+        aria-label="Drag to move style bar"
+        data-testid="style-bar-drag-handle"
+      >
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden>
+          <circle cx="4" cy="4" r="1.2" />
+          <circle cx="10" cy="4" r="1.2" />
+          <circle cx="4" cy="8" r="1.2" />
+          <circle cx="10" cy="8" r="1.2" />
+          <circle cx="4" cy="12" r="1.2" />
+          <circle cx="10" cy="12" r="1.2" />
+        </svg>
+      </div>
+      <div className="sb-divider" />
       {/* Shape Switcher (shapes only, not lines or text or frame, single select only) */}
       {!isMulti && !isFrame && isShape && (
         <>
@@ -775,6 +836,7 @@ export function StyleBar({
               </div>
             </>
           )}
+          {!isLine && <div className="sb-divider" />}
           <div className="sb-field">
             <label>X</label>
             <input
@@ -801,6 +863,7 @@ export function StyleBar({
               aria-label="Y"
             />
           </div>
+          {!isLine && <div className="sb-divider" />}
           {!isLine && (
             <div className="sb-field">
               <label title="Rotation">°</label>

@@ -4,7 +4,7 @@ export const boardTools: Anthropic.Tool[] = [
   {
     name: "createStickyNote",
     description:
-      "Create a sticky note. Use for ideas, tasks, or any text card. Default size 200x200px. If position not specified by user, space them 220px apart from each other.",
+      "Create a sticky note at a position with optional size and color. Pass x, y for position; color for background. Default size 200x200px. Use exactPosition to place at exact (x,y) without overlap shifting.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -16,51 +16,266 @@ export const boardTools: Anthropic.Tool[] = [
           enum: ["yellow", "pink", "blue", "green", "purple", "orange"],
           description: "Background color of the sticky note",
         },
+        exactPosition: {
+          type: "boolean" as const,
+          description: "If true, place at exact (x,y) without avoiding overlap. Use for drawings/pictures.",
+        },
+        zIndex: {
+          type: "number" as const,
+          description: "Stacking order. Higher values render on top. Use to layer parts correctly (e.g. body=0, head=1, eyes=2).",
+        },
       },
       required: ["text", "x", "y", "color"],
     },
   },
   {
+    name: "createStickyNotes",
+    description:
+      "Create many sticky notes in one call (e.g. grids with stickies, bulk add). Pass an array of stickies; each item has text, x, y, color (optional exactPosition). Max 50 per call; if more are needed, call this tool repeatedly in batches and keep global grid coordinates (do not restart x/y at 0,0 each batch). Coordinates are relative to empty space (0,0 = first slot); exactPosition defaults to true. Use for 'add 50 sticky notes', 'grid with stickies', etc. Use createStickyNote only for a single sticky.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        stickies: {
+          type: "array" as const,
+          description: "List of sticky note specs",
+          items: {
+            type: "object" as const,
+            properties: {
+              text: {type: "string" as const, description: "Text content of the sticky note"},
+              x: {type: "number" as const, description: "X coordinate (relative to grid origin)"},
+              y: {type: "number" as const, description: "Y coordinate (relative to grid origin)"},
+              color: {
+                type: "string" as const,
+                enum: ["yellow", "pink", "blue", "green", "purple", "orange"],
+                description: "Background color",
+              },
+              exactPosition: {
+                type: "boolean" as const,
+                description: "If true, place at exact (x,y) for this sticky",
+              },
+            },
+            required: ["text", "x", "y", "color"],
+          },
+        },
+        exactPosition: {
+          type: "boolean" as const,
+          description: "If true, all stickies use exact (x,y); use for grids. Default true.",
+        },
+      },
+      required: ["stickies"],
+    },
+  },
+  {
     name: "createShape",
     description:
-      "Create a geometric shape. Use for diagrams, borders, or visual separators.",
+      "Create a single shape at (x, y) with size (width, height) and color. Use createShapes for 2+ shapes. Types: rectangle, circle, triangle, star (filled); line (plain), arrow-single (one arrowhead), arrow-double (two arrowheads). For bent lines/arrows pass optional waypoints: array of {x, y} absolute bend points.",
     input_schema: {
       type: "object" as const,
       properties: {
         shapeType: {
           type: "string" as const,
-          enum: ["rectangle", "circle", "line"],
-          description: "Type of geometric shape to create",
+          enum: ["rectangle", "circle", "triangle", "star", "line", "arrow-single", "arrow-double"],
+          description: "Shape type: rectangle/circle/triangle/star (filled), line/arrow-single/arrow-double (paths)",
         },
         x: {type: "number" as const, description: "X coordinate on the board"},
         y: {type: "number" as const, description: "Y coordinate on the board"},
-        width: {type: "number" as const, description: "Width in pixels (default 200)"},
-        height: {type: "number" as const, description: "Height in pixels (default 200)"},
-        color: {type: "string" as const, description: "Fill color as hex string (e.g. #90CAF9)"},
+        width: {type: "number" as const, description: "Width in pixels"},
+        height: {type: "number" as const, description: "Height in pixels"},
+        color: {type: "string" as const, description: "Fill color as hex (e.g. #90CAF9)"},
+        waypoints: {
+          type: "array" as const,
+          description: "Bend points for line/arrow. Each item: {x, y} in absolute board coords.",
+          items: {
+            type: "object" as const,
+            properties: {
+              x: {type: "number" as const, description: "X of bend point"},
+              y: {type: "number" as const, description: "Y of bend point"},
+            },
+            required: ["x", "y"],
+          },
+        },
+        exactPosition: {
+          type: "boolean" as const,
+          description: "If true, place at exact (x,y) without avoiding overlap. Use for drawings (e.g. cat, house).",
+        },
+        zIndex: {
+          type: "number" as const,
+          description: "Stacking order. Higher values render on top. Use to layer parts correctly (e.g. body=0, head=1, eyes=2).",
+        },
       },
       required: ["shapeType", "x", "y", "width", "height", "color"],
     },
   },
   {
-    name: "createFrame",
+    name: "createShapes",
     description:
-      "Create a labeled container to group content. Use for sections, swim lanes, quadrants, columns.",
+      "Create many shapes in one call (e.g. grids, matrices). Pass an array of shapes; each item has shapeType, x, y, width, height, color (optional waypoints, exactPosition). Types: rectangle, circle, triangle, star, line, arrow-single, arrow-double. Use for 'make a grid of 500 shapes', 'add 20 circles', etc. Max 50 shapes per call; if more are needed, call this tool repeatedly in batches and keep global grid coordinates (do not restart x/y at 0,0 each batch). Coordinates are relative to empty space (0,0 = first slot); set exactPosition: true to place at exact (x,y). Omit color unless the user asks for specific colors.",
     input_schema: {
       type: "object" as const,
       properties: {
-        title: {type: "string" as const, description: "Label displayed on the frame"},
+        shapes: {
+          type: "array" as const,
+          description: "List of shape specs; each has shapeType, x, y, width, height, color",
+          items: {
+            type: "object" as const,
+            properties: {
+              shapeType: {
+                type: "string" as const,
+                enum: ["rectangle", "circle", "triangle", "star", "line", "arrow-single", "arrow-double"],
+                description: "Shape type",
+              },
+              x: {type: "number" as const, description: "X coordinate (relative to grid origin)"},
+              y: {type: "number" as const, description: "Y coordinate (relative to grid origin)"},
+              width: {type: "number" as const, description: "Width in pixels"},
+              height: {type: "number" as const, description: "Height in pixels"},
+              color: {type: "string" as const, description: "Fill color as hex (e.g. #90CAF9)"},
+              waypoints: {
+                type: "array" as const,
+                description: "Bend points for line/arrow; each item {x, y}",
+                items: {
+                  type: "object" as const,
+                  properties: {
+                    x: {type: "number" as const},
+                    y: {type: "number" as const},
+                  },
+                  required: ["x", "y"],
+                },
+              },
+              exactPosition: {
+                type: "boolean" as const,
+                description: "If true, place at exact (x,y) for this shape",
+              },
+            },
+            required: ["shapeType", "x", "y", "width", "height"],
+          },
+        },
+        exactPosition: {
+          type: "boolean" as const,
+          description: "If true, all shapes use exact (x,y); use for grids. Default true.",
+        },
+      },
+      required: ["shapes"],
+    },
+  },
+  {
+    name: "createTextBoxes",
+    description:
+      "Create many text boxes in one call (e.g. grids of labels, bulk headings). Pass an array of textBoxes; each item has text, x, y (optional width, height). Max 50 per call; if more are needed, call this tool repeatedly in batches and keep global grid coordinates (do not restart x/y at 0,0 each batch). Coordinates relative to empty space; exactPosition defaults to true. Use createTextBox only for a single text box.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        textBoxes: {
+          type: "array" as const,
+          description: "List of text box specs",
+          items: {
+            type: "object" as const,
+            properties: {
+              text: {type: "string" as const, description: "Initial text content"},
+              x: {type: "number" as const, description: "X coordinate (relative to grid origin)"},
+              y: {type: "number" as const, description: "Y coordinate (relative to grid origin)"},
+              width: {type: "number" as const, description: "Width in pixels. Optional; default 200."},
+              height: {type: "number" as const, description: "Height in pixels. Optional; default 40."},
+              exactPosition: {type: "boolean" as const, description: "If true, place at exact (x,y) for this item"},
+            },
+            required: ["x", "y"],
+          },
+        },
+        exactPosition: {
+          type: "boolean" as const,
+          description: "If true, all text boxes use exact (x,y); use for grids. Default true.",
+        },
+      },
+      required: ["textBoxes"],
+    },
+  },
+  {
+    name: "createFrame",
+    description:
+      "Create a single frame with title (label), position (x, y), size (width, height), and optional color. Use createFrames for 2+ frames. Use for sections, SWOT quadrants, swim lanes, retrospectives. Always pass title (e.g. 'Strengths', 'What Went Well'), x, y, width, height; optionally color (hex).",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        title: {type: "string" as const, description: "Title/label shown on the frame (e.g. 'SWOT - Strengths', 'Team A')"},
         x: {type: "number" as const, description: "X coordinate on the board"},
         y: {type: "number" as const, description: "Y coordinate on the board"},
-        width: {type: "number" as const, description: "Width in pixels (default 400)"},
-        height: {type: "number" as const, description: "Height in pixels (default 300)"},
+        width: {type: "number" as const, description: "Width in pixels"},
+        height: {type: "number" as const, description: "Height in pixels"},
+        color: {
+          type: "string" as const,
+          description: "Frame header/fill color as hex (e.g. #3366ff). Optional; default blue.",
+        },
+        exactPosition: {
+          type: "boolean" as const,
+          description: "If true, place at exact (x,y) without avoiding overlap. Use for layouts.",
+        },
+        zIndex: {
+          type: "number" as const,
+          description: "Stacking order. Higher values render on top. Frames usually have the lowest zIndex.",
+        },
       },
       required: ["title", "x", "y", "width", "height"],
     },
   },
   {
+    name: "createFrames",
+    description:
+      "Create many frames in one call (e.g. SWOT 4 quadrants, retrospective columns, bulk sections). Pass an array of frames; each item has title, x, y, width, height (optional color, exactPosition). Max 50 per call; if more are needed, call this tool repeatedly in batches and keep global grid coordinates (do not restart x/y at 0,0 each batch). Coordinates relative to empty space; exactPosition defaults to true. Use createFrame only for a single frame.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        frames: {
+          type: "array" as const,
+          description: "List of frame specs",
+          items: {
+            type: "object" as const,
+            properties: {
+              title: {type: "string" as const, description: "Title/label shown on the frame"},
+              x: {type: "number" as const, description: "X coordinate (relative to grid origin)"},
+              y: {type: "number" as const, description: "Y coordinate (relative to grid origin)"},
+              width: {type: "number" as const, description: "Width in pixels"},
+              height: {type: "number" as const, description: "Height in pixels"},
+              color: {type: "string" as const, description: "Frame header color as hex. Optional; default blue."},
+              exactPosition: {type: "boolean" as const, description: "If true, place at exact (x,y) for this frame"},
+            },
+            required: ["title", "x", "y", "width", "height"],
+          },
+        },
+        exactPosition: {
+          type: "boolean" as const,
+          description: "If true, all frames use exact (x,y); use for layouts. Default true.",
+        },
+      },
+      required: ["frames"],
+    },
+  },
+  {
+    name: "createTextBox",
+    description:
+      "Create a standalone text box at (x, y) with optional content and size. Use for labels, headings, or short text without a sticky background. Default size 200x40px. Pass text for initial content; optional width, height.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        text: {type: "string" as const, description: "Initial text content of the text box. Optional; default empty."},
+        x: {type: "number" as const, description: "X coordinate on the board"},
+        y: {type: "number" as const, description: "Y coordinate on the board"},
+        width: {type: "number" as const, description: "Width in pixels. Optional; default 200."},
+        height: {type: "number" as const, description: "Height in pixels. Optional; default 40."},
+        exactPosition: {
+          type: "boolean" as const,
+          description: "If true, place at exact (x,y) without avoiding overlap.",
+        },
+        zIndex: {
+          type: "number" as const,
+          description: "Stacking order. Higher values render on top.",
+        },
+      },
+      required: ["x", "y"],
+    },
+  },
+  {
     name: "createConnector",
     description:
-      "Draw an arrow or line between two existing objects. IMPORTANT: only call after you have valid objectIds from getBoardState or from a just-created object.",
+      "Use when the user asks to draw a line between two objects, connect two objects, or link two shapes. Call getBoardState first to get valid fromId and toId. Optionally pass fromPoint and toPoint when the user specifies attachment points (e.g. 'from the tip to the left edge' — triangle tip = corner-0, square left = left). Optionally pass waypoints (array of {x, y}) for bent paths. Style: arrow, line, or dashed.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -71,6 +286,26 @@ export const boardTools: Anthropic.Tool[] = [
           enum: ["arrow", "line", "dashed"],
           description: "Visual style of the connector",
         },
+        fromPoint: {
+          type: "string" as const,
+          description: "Attachment point ID on the source shape (e.g. center, triangle tip = corner-0, square left = left). If omitted, line starts at shape center.",
+        },
+        toPoint: {
+          type: "string" as const,
+          description: "Attachment point ID on the target shape (e.g. center, left, right, top, corner-0). If omitted, line ends at shape center.",
+        },
+        waypoints: {
+          type: "array" as const,
+          description: "Optional bend points. Each item: {x, y} in absolute board coords. If omitted, path is auto-routed.",
+          items: {
+            type: "object" as const,
+            properties: {
+              x: {type: "number" as const, description: "X of bend point"},
+              y: {type: "number" as const, description: "Y of bend point"},
+            },
+            required: ["x", "y"],
+          },
+        },
       },
       required: ["fromId", "toId", "style"],
     },
@@ -78,7 +313,7 @@ export const boardTools: Anthropic.Tool[] = [
   {
     name: "moveObject",
     description:
-      "Move an existing object to new coordinates. ALWAYS call getBoardState first to get valid objectIds and current positions before calling this.",
+      "Move a single object to new coordinates. If the object is a frame, its contained shapes move with it. ALWAYS call getBoardState first to get valid objectIds and current positions.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -87,6 +322,30 @@ export const boardTools: Anthropic.Tool[] = [
         y: {type: "number" as const, description: "New Y coordinate"},
       },
       required: ["objectId", "x", "y"],
+    },
+  },
+  {
+    name: "moveMultipleObjects",
+    description:
+      "Move many objects at once (e.g. rearrange into a row or grid). Pass an array of { objectId, x, y }. ALWAYS call getBoardState first to get valid objectIds and current positions. Use this for 'rearrange', 'align', 'space out', or moving several items together. For large selections, execution is automatically chunked in batches of 50.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        moves: {
+          type: "array" as const,
+          description: "List of moves: each item has objectId (string), x (number), y (number)",
+          items: {
+            type: "object" as const,
+            properties: {
+              objectId: {type: "string" as const, description: "ID of the object to move"},
+              x: {type: "number" as const, description: "New X coordinate"},
+              y: {type: "number" as const, description: "New Y coordinate"},
+            },
+            required: ["objectId", "x", "y"],
+          },
+        },
+      },
+      required: ["moves"],
     },
   },
   {
@@ -101,6 +360,66 @@ export const boardTools: Anthropic.Tool[] = [
         height: {type: "number" as const, description: "New height in pixels"},
       },
       required: ["objectId", "width", "height"],
+    },
+  },
+  {
+    name: "resizeMultipleObjects",
+    description:
+      "Resize many objects at once (e.g. multi-select). Pass an array of { objectId, width, height }. Use for 'make all stickies bigger', 'resize these shapes to 100x100', or resizing several selected items. For large selections, execution is automatically chunked in batches of 50. ALWAYS call getBoardState first.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        resizes: {
+          type: "array" as const,
+          description: "List of resizes: each item has objectId (string), width (number), height (number)",
+          items: {
+            type: "object" as const,
+            properties: {
+              objectId: {type: "string" as const, description: "ID of the object to resize"},
+              width: {type: "number" as const, description: "New width in pixels"},
+              height: {type: "number" as const, description: "New height in pixels"},
+            },
+            required: ["objectId", "width", "height"],
+          },
+        },
+      },
+      required: ["resizes"],
+    },
+  },
+  {
+    name: "rotateObject",
+    description:
+      "Set rotation of a single object in degrees. Works for all shapes (rectangle, circle, triangle, star), lines/arrows, frames, sticky notes, and text. If the object is a frame, its contained shapes rotate with it (same delta). ALWAYS call getBoardState first for valid objectIds.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        objectId: {type: "string" as const, description: "ID of the object to rotate"},
+        rotation: {type: "number" as const, description: "Rotation in degrees (e.g. 0, 45, 90, -30). Typically -360 to 360."},
+      },
+      required: ["objectId", "rotation"],
+    },
+  },
+  {
+    name: "rotateMultipleObjects",
+    description:
+      "Set rotation of many objects at once (e.g. marquee multi-select). Pass an array of { objectId, rotation }. Use for 'rotate all sticky notes 45°', 'tilt these shapes', or rotating several selected items. If any object is a frame, its children rotate with it. For large selections, execution is automatically chunked in batches of 50. ALWAYS call getBoardState first.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        rotations: {
+          type: "array" as const,
+          description: "List of rotations: each item has objectId (string), rotation (number, degrees)",
+          items: {
+            type: "object" as const,
+            properties: {
+              objectId: {type: "string" as const, description: "ID of the object to rotate"},
+              rotation: {type: "number" as const, description: "Rotation in degrees"},
+            },
+            required: ["objectId", "rotation"],
+          },
+        },
+      },
+      required: ["rotations"],
     },
   },
   {
@@ -130,9 +449,47 @@ export const boardTools: Anthropic.Tool[] = [
     },
   },
   {
+    name: "deleteObject",
+    description:
+      "Delete a single object by ID. If the object is a frame, all children inside it are also deleted. ALWAYS call getBoardState first to get valid objectIds.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        objectId: {type: "string" as const, description: "ID of the object to delete"},
+      },
+      required: ["objectId"],
+    },
+  },
+  {
+    name: "deleteMultipleObjects",
+    description:
+      "Delete many objects at once. Pass an array of objectIds. Use for bulk removal (e.g. 'delete all sticky notes', 'remove these shapes'). For large selections, execution is automatically chunked in batches of 50. ALWAYS call getBoardState first to get valid objectIds.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        objectIds: {
+          type: "array" as const,
+          description: "List of object IDs to delete",
+          items: {type: "string" as const, description: "ID of an object to delete"},
+        },
+      },
+      required: ["objectIds"],
+    },
+  },
+  {
+    name: "clearBoard",
+    description:
+      "Delete EVERY object on the board. This is destructive — only use when the user explicitly asks to clear, wipe, or start fresh. No parameters needed.",
+    input_schema: {
+      type: "object" as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
     name: "getBoardState",
     description:
-      "Returns ALL current objects on the board with their ids, positions, types and properties. ALWAYS call this before any manipulation command. Call this first for: move, resize, recolor, arrange, any command referencing existing objects.",
+      "Returns EVERY object currently on the board with no limit: objects (array with id, type, x, y, etc.), total count, byType counts, and a summary string. For 'change all sticky notes' or 'recolor all X': call getBoardState FIRST, then filter objects by type (e.g. type==='sticky'), then call changeColor/updateText for EACH object in that filtered list. Never act only on objects you just created—use getBoardState to include everything on the board.",
     input_schema: {
       type: "object" as const,
       properties: {},

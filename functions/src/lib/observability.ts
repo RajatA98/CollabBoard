@@ -8,11 +8,11 @@ let langfuse: Langfuse | null = null;
 
 function getLangfuse(): Langfuse | null {
   if (langfuse) return langfuse;
-  const secretKey = process.env.LANGFUSE_SECRET_KEY;
-  const publicKey = process.env.LANGFUSE_PUBLIC_KEY;
-  const baseUrl = process.env.LANGFUSE_HOST;
+  const secretKey = process.env.LANGFUSE_SECRET_KEY?.trim();
+  const publicKey = process.env.LANGFUSE_PUBLIC_KEY?.trim();
+  const baseUrl = (process.env.LANGFUSE_HOST ?? process.env.LANGFUSE_BASE_URL)?.trim();
   if (!secretKey || !publicKey) return null;
-  langfuse = new Langfuse({secretKey, publicKey, baseUrl});
+  langfuse = new Langfuse({secretKey, publicKey, ...(baseUrl ? {baseUrl} : {})});
   return langfuse;
 }
 
@@ -93,7 +93,8 @@ export async function traceAgentCall(config: {
 
       startSpan(name: string, input: unknown): Span {
         try {
-          const span = trace.span({name, input});
+          const spanName = (name && String(name).trim()) || "span";
+          const span = trace.span({name: spanName, input});
           return {
             end(output: {result?: unknown}) {
               try {
@@ -142,10 +143,13 @@ export async function traceAgentCall(config: {
   }
 }
 
+/** Flush all queued Langfuse events. Use shutdownAsync so all spans (e.g. getBoardState) are sent. */
 export async function flushAll(): Promise<void> {
   try {
     const lf = getLangfuse();
-    if (lf) await lf.flushAsync();
+    if (lf) {
+      await lf.shutdownAsync();
+    }
   } catch {
     // Non-blocking — never crash the agent over observability
   }

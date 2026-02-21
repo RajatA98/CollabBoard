@@ -11,6 +11,8 @@ export interface BoardObject {
   updatedAt: number;
   updatedBy: string;
   locked: boolean;
+  /** When set, this object is inside the frame with this id; used when moving a frame with its children. */
+  frameId?: string;
 }
 
 export interface StickyNote extends BoardObject {

@@ -1,311 +1,222 @@
-import * as admin from "firebase-admin";
-import {v4 as uuidv4} from "uuid";
-import type {
-  AnyBoardObject,
-  StickyNote,
-  Shape,
-  Frame,
-  Connector,
-} from "./types.js";
+/**
+ * Thin wrapper: re-exports the 9 spec tools from tools/ so agentRunner
+ * and other callers keep the same import path. Adapts (boardId, input, userId?)
+ * to (boardId, userId, input) where needed.
+ */
+import {
+  getBoardState,
+  createStickyNote,
+  createStickyNotes as toolsCreateStickyNotes,
+  createShape,
+  createShapes as toolsCreateShapes,
+  createFrame,
+  createFrames as toolsCreateFrames,
+  createTextBox,
+  createTextBoxes as toolsCreateTextBoxes,
+  createConnector,
+  moveObject as toolsMoveObject,
+  moveMultipleObjects as toolsMoveMultipleObjects,
+  resizeObject as toolsResizeObject,
+  resizeMultipleObjects as toolsResizeMultipleObjects,
+  rotateObject as toolsRotateObject,
+  rotateMultipleObjects as toolsRotateMultipleObjects,
+  updateText as toolsUpdateText,
+  changeColor as toolsChangeColor,
+  deleteObject as toolsDeleteObject,
+  deleteMultipleObjects as toolsDeleteMultipleObjects,
+  clearBoard as toolsClearBoard,
+} from "../tools/index.js";
 
-const db = admin.firestore();
+export {getBoardState, createStickyNote, createShape, createFrame, createTextBox, createConnector};
 
-function objectsCollection(boardId: string) {
-  return db.collection("boards").doc(boardId).collection("objects");
-}
+const AGENT_BULK_MAX = 50;
 
-// ---------------------------------------------------------------------------
-// CREATE
-// ---------------------------------------------------------------------------
+type CreateStickyNotesInput = {
+  stickies: Array<{
+    text?: string;
+    x: number;
+    y: number;
+    color: string;
+    exactPosition?: boolean;
+  }>;
+  exactPosition?: boolean;
+  _genOrigin?: { x: number; y: number };
+  _baseZIndex?: number;
+};
 
-export async function createStickyNote(
+export async function createStickyNotes(
   boardId: string,
-  userId: string,
-  input: {text: string; x: number; y: number; color: StickyNote["color"]}
-): Promise<{objectId: string; x: number; y: number; type: string}> {
-  try {
-    const id = uuidv4();
-    const now = Date.now();
-    const obj: StickyNote = {
-      id,
-      type: "sticky",
-      x: input.x,
-      y: input.y,
-      width: 200,
-      height: 200,
-      rotation: 0,
-      text: input.text,
-      color: input.color,
-      createdBy: userId,
-      createdAt: now,
-      updatedAt: now,
-      updatedBy: userId,
-      locked: false,
-    };
-    await objectsCollection(boardId).doc(id).set(obj);
-    return {objectId: id, x: obj.x, y: obj.y, type: "sticky"};
-  } catch (error) {
-    console.error(
-      `[toolExecutor] createStickyNote failed on board ${boardId}:`,
-      error
-    );
-    throw error;
+  userId: string | undefined,
+  input: CreateStickyNotesInput
+) {
+  if ((input.stickies?.length ?? 0) > AGENT_BULK_MAX) {
+    throw new Error(`createStickyNotes: max ${AGENT_BULK_MAX} per call for AI; split into batches.`);
   }
+  return toolsCreateStickyNotes(boardId, userId ?? "ai", input);
 }
 
-export async function createShape(
-  boardId: string,
-  userId: string,
-  input: {
-    shapeType: Shape["shape"];
+type CreateShapesInput = {
+  shapes: Array<{
+    shapeType: string;
     x: number;
     y: number;
     width: number;
     height: number;
-    color: string;
-  }
-): Promise<{objectId: string; x: number; y: number; type: string}> {
-  try {
-    const id = uuidv4();
-    const now = Date.now();
-    const obj: Shape = {
-      id,
-      type: "shape",
-      shape: input.shapeType,
-      x: input.x,
-      y: input.y,
-      width: input.width,
-      height: input.height,
-      rotation: 0,
-      color: input.color,
-      strokeColor: "#000000",
-      strokeWidth: 2,
-      createdBy: userId,
-      createdAt: now,
-      updatedAt: now,
-      updatedBy: userId,
-      locked: false,
-    };
-    await objectsCollection(boardId).doc(id).set(obj);
-    return {objectId: id, x: obj.x, y: obj.y, type: "shape"};
-  } catch (error) {
-    console.error(
-      `[toolExecutor] createShape failed on board ${boardId}:`,
-      error
-    );
-    throw error;
-  }
-}
+    color?: string;
+    waypoints?: Array<{ x: number; y: number }>;
+    exactPosition?: boolean;
+  }>;
+  exactPosition?: boolean;
+  _genOrigin?: { x: number; y: number };
+  _baseZIndex?: number;
+};
 
-export async function createFrame(
+export async function createShapes(
   boardId: string,
-  userId: string,
-  input: {title: string; x: number; y: number; width: number; height: number}
-): Promise<{objectId: string; x: number; y: number; type: string}> {
-  try {
-    const id = uuidv4();
-    const now = Date.now();
-    const obj: Frame = {
-      id,
-      type: "frame",
-      title: input.title,
-      x: input.x,
-      y: input.y,
-      width: input.width,
-      height: input.height,
-      rotation: 0,
-      backgroundColor: "rgba(240,240,240,0.5)",
-      childIds: [],
-      createdBy: userId,
-      createdAt: now,
-      updatedAt: now,
-      updatedBy: userId,
-      locked: false,
-    };
-    await objectsCollection(boardId).doc(id).set(obj);
-    return {objectId: id, x: obj.x, y: obj.y, type: "frame"};
-  } catch (error) {
-    console.error(
-      `[toolExecutor] createFrame failed on board ${boardId}:`,
-      error
-    );
-    throw error;
+  userId: string | undefined,
+  input: CreateShapesInput
+) {
+  if ((input.shapes?.length ?? 0) > AGENT_BULK_MAX) {
+    throw new Error(`createShapes: max ${AGENT_BULK_MAX} per call for AI; split into batches.`);
   }
+  return toolsCreateShapes(boardId, userId ?? "ai", input);
 }
 
-export async function createConnector(
+type CreateTextBoxesInput = {
+  textBoxes: Array<{
+    text?: string;
+    x: number;
+    y: number;
+    width?: number;
+    height?: number;
+    exactPosition?: boolean;
+  }>;
+  exactPosition?: boolean;
+  _genOrigin?: { x: number; y: number };
+  _baseZIndex?: number;
+};
+
+export async function createTextBoxes(
   boardId: string,
-  userId: string,
-  input: {fromId: string; toId: string; style: Connector["style"]}
-): Promise<{objectId: string; type: string}> {
-  try {
-    // Validate that both referenced objects exist
-    const fromDoc = await objectsCollection(boardId).doc(input.fromId).get();
-    if (!fromDoc.exists) {
-      throw new Error(`Object ${input.fromId} not found on board`);
-    }
-    const toDoc = await objectsCollection(boardId).doc(input.toId).get();
-    if (!toDoc.exists) {
-      throw new Error(`Object ${input.toId} not found on board`);
-    }
-
-    const id = uuidv4();
-    const now = Date.now();
-    const obj: Connector = {
-      id,
-      type: "connector",
-      fromId: input.fromId,
-      toId: input.toId,
-      style: input.style,
-      color: "#424242",
-      x: 0,
-      y: 0,
-      width: 0,
-      height: 0,
-      rotation: 0,
-      createdBy: userId,
-      createdAt: now,
-      updatedAt: now,
-      updatedBy: userId,
-      locked: false,
-    };
-    await objectsCollection(boardId).doc(id).set(obj);
-    return {objectId: id, type: "connector"};
-  } catch (error) {
-    console.error(
-      `[toolExecutor] createConnector failed on board ${boardId}:`,
-      error
-    );
-    throw error;
+  userId: string | undefined,
+  input: CreateTextBoxesInput
+) {
+  if ((input.textBoxes?.length ?? 0) > AGENT_BULK_MAX) {
+    throw new Error(`createTextBoxes: max ${AGENT_BULK_MAX} per call for AI; split into batches.`);
   }
+  return toolsCreateTextBoxes(boardId, userId ?? "ai", input);
 }
 
-// ---------------------------------------------------------------------------
-// MANIPULATE
-// ---------------------------------------------------------------------------
+type CreateFramesInput = {
+  frames: Array<{
+    title?: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    color?: string;
+    exactPosition?: boolean;
+  }>;
+  exactPosition?: boolean;
+  _genOrigin?: { x: number; y: number };
+  _baseZIndex?: number;
+};
+
+export async function createFrames(
+  boardId: string,
+  userId: string | undefined,
+  input: CreateFramesInput
+) {
+  if ((input.frames?.length ?? 0) > AGENT_BULK_MAX) {
+    throw new Error(`createFrames: max ${AGENT_BULK_MAX} per call for AI; split into batches.`);
+  }
+  return toolsCreateFrames(boardId, userId ?? "ai", input);
+}
 
 export async function moveObject(
   boardId: string,
-  input: {objectId: string; x: number; y: number}
-): Promise<{objectId: string; x: number; y: number}> {
-  try {
-    const ref = objectsCollection(boardId).doc(input.objectId);
-    const snap = await ref.get();
-    if (!snap.exists) {
-      throw new Error(`Object ${input.objectId} not found on board`);
-    }
-    await ref.update({
-      x: input.x,
-      y: input.y,
-      updatedAt: Date.now(),
-    });
-    return {objectId: input.objectId, x: input.x, y: input.y};
-  } catch (error) {
-    console.error(
-      `[toolExecutor] moveObject failed on board ${boardId}:`,
-      error
-    );
-    throw error;
-  }
+  input: { objectId: string; x: number; y: number },
+  userId?: string
+) {
+  return toolsMoveObject(boardId, userId ?? "ai", input);
+}
+
+export async function moveMultipleObjects(
+  boardId: string,
+  input: { moves: Array<{ objectId: string; x: number; y: number }> },
+  userId?: string
+) {
+  return toolsMoveMultipleObjects(boardId, userId ?? "ai", input);
 }
 
 export async function resizeObject(
   boardId: string,
-  input: {objectId: string; width: number; height: number}
-): Promise<{objectId: string; width: number; height: number}> {
-  try {
-    const ref = objectsCollection(boardId).doc(input.objectId);
-    const snap = await ref.get();
-    if (!snap.exists) {
-      throw new Error(`Object ${input.objectId} not found on board`);
-    }
-    await ref.update({
-      width: input.width,
-      height: input.height,
-      updatedAt: Date.now(),
-    });
-    return {
-      objectId: input.objectId,
-      width: input.width,
-      height: input.height,
-    };
-  } catch (error) {
-    console.error(
-      `[toolExecutor] resizeObject failed on board ${boardId}:`,
-      error
-    );
-    throw error;
-  }
+  input: { objectId: string; width: number; height: number },
+  userId?: string
+) {
+  return toolsResizeObject(boardId, userId ?? "ai", input);
+}
+
+export async function resizeMultipleObjects(
+  boardId: string,
+  input: { resizes: Array<{ objectId: string; width: number; height: number }> },
+  userId?: string
+) {
+  return toolsResizeMultipleObjects(boardId, userId ?? "ai", input);
+}
+
+export async function rotateObject(
+  boardId: string,
+  input: { objectId: string; rotation: number },
+  userId?: string
+) {
+  return toolsRotateObject(boardId, userId ?? "ai", input);
+}
+
+export async function rotateMultipleObjects(
+  boardId: string,
+  input: { rotations: Array<{ objectId: string; rotation: number }> },
+  userId?: string
+) {
+  return toolsRotateMultipleObjects(boardId, userId ?? "ai", input);
 }
 
 export async function updateText(
   boardId: string,
-  input: {objectId: string; newText: string}
-): Promise<{objectId: string}> {
-  try {
-    const ref = objectsCollection(boardId).doc(input.objectId);
-    const snap = await ref.get();
-    if (!snap.exists) {
-      throw new Error(`Object ${input.objectId} not found on board`);
-    }
-    const data = snap.data() as AnyBoardObject;
-    if (data.type !== "sticky") {
-      throw new Error("updateText only works on sticky notes");
-    }
-    await ref.update({
-      text: input.newText,
-      updatedAt: Date.now(),
-    });
-    return {objectId: input.objectId};
-  } catch (error) {
-    console.error(
-      `[toolExecutor] updateText failed on board ${boardId}:`,
-      error
-    );
-    throw error;
-  }
+  input: { objectId: string; newText: string },
+  userId?: string
+) {
+  return toolsUpdateText(boardId, userId ?? "ai", input);
 }
 
 export async function changeColor(
   boardId: string,
-  input: {objectId: string; color: string}
-): Promise<{objectId: string}> {
-  try {
-    const ref = objectsCollection(boardId).doc(input.objectId);
-    const snap = await ref.get();
-    if (!snap.exists) {
-      throw new Error(`Object ${input.objectId} not found on board`);
-    }
-    await ref.update({
-      color: input.color,
-      updatedAt: Date.now(),
-    });
-    return {objectId: input.objectId};
-  } catch (error) {
-    console.error(
-      `[toolExecutor] changeColor failed on board ${boardId}:`,
-      error
-    );
-    throw error;
-  }
+  input: { objectId: string; color: string },
+  userId?: string
+) {
+  return toolsChangeColor(boardId, userId ?? "ai", input);
 }
 
-// ---------------------------------------------------------------------------
-// READ
-// ---------------------------------------------------------------------------
+export async function deleteObject(
+  boardId: string,
+  input: { objectId: string },
+  userId?: string
+) {
+  return toolsDeleteObject(boardId, userId ?? "ai", input);
+}
 
-export async function getBoardState(
-  boardId: string
-): Promise<AnyBoardObject[]> {
-  try {
-    const snapshot = await objectsCollection(boardId).get();
-    if (snapshot.empty) return [];
-    return snapshot.docs.map((doc) => doc.data() as AnyBoardObject);
-  } catch (error) {
-    console.error(
-      `[toolExecutor] getBoardState failed on board ${boardId}:`,
-      error
-    );
-    throw error;
-  }
+export async function deleteMultipleObjects(
+  boardId: string,
+  input: { objectIds: string[] },
+  userId?: string
+) {
+  return toolsDeleteMultipleObjects(boardId, userId ?? "ai", input);
+}
+
+export async function clearBoard(
+  boardId: string,
+  input: Record<string, never>,
+  userId?: string
+) {
+  return toolsClearBoard(boardId, userId ?? "ai", input);
 }

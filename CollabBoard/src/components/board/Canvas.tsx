@@ -519,6 +519,7 @@ export function Canvas({
           ? selectedObjectIds
           : [draggedId];
       onDragStart?.(idsBeingDragged);
+
       if (selectedObjectIds.includes(draggedId) && selectedObjectIds.length > 1) {
         const stage = stageRef.current;
         if (!stage) return;
@@ -1089,6 +1090,24 @@ export function Canvas({
     return () => window.removeEventListener('mouseup', onWindowMouseUp);
   }, [drawingConnection, objects, onConnectShapes]);
 
+  // ── Viewport culling: only render objects near the visible area ─────────
+  const CULL_MARGIN = 500;
+  const visibleObjects = useMemo(() => {
+    if (!viewport || !stageSize) return objects;
+    const worldLeft = -viewport.x / viewport.scaleX - CULL_MARGIN;
+    const worldTop = -viewport.y / viewport.scaleY - CULL_MARGIN;
+    const worldRight = worldLeft + stageSize.width / viewport.scaleX + CULL_MARGIN * 2;
+    const worldBottom = worldTop + stageSize.height / viewport.scaleY + CULL_MARGIN * 2;
+    return objects.filter(obj => {
+      if (selectedObjectIds.includes(obj.id)) return true;
+      const ox = obj.x ?? 0;
+      const oy = obj.y ?? 0;
+      const ow = obj.width ?? 200;
+      const oh = obj.height ?? 200;
+      return ox + ow >= worldLeft && ox <= worldRight && oy + oh >= worldTop && oy <= worldBottom;
+    });
+  }, [objects, viewport, stageSize, selectedObjectIds]);
+
   // ── Line endpoint drag with snap ────────────────────────────────────────
   const nonLineObjects = objects.filter(o => o.type !== 'line' && o.type !== 'frame');
 
@@ -1266,12 +1285,12 @@ export function Canvas({
           />
         )}
         {/* Render non-selected objects first so selected objects + Transformer draw on top */}
-        {objects
+        {visibleObjects
           .filter((obj) => !selectedObjectIds.includes(obj.id))
           .sort((a, b) => {
             if (a.type === 'frame' && b.type !== 'frame') return -1;
             if (a.type !== 'frame' && b.type === 'frame') return 1;
-            return 0;
+            return (a.zIndex ?? 0) - (b.zIndex ?? 0);
           })
           .map((obj) => {
             const remoteXform = remoteTransformByObjectId[obj.id];
@@ -1313,12 +1332,12 @@ export function Canvas({
           })}
         {/* Render selected objects; Transformer only when exactly one selected */}
         {selectedObjectIds.length > 0 &&
-          objects
+          visibleObjects
             .filter((obj) => selectedObjectIds.includes(obj.id))
             .sort((a, b) => {
               if (a.type === 'frame' && b.type !== 'frame') return -1;
               if (a.type !== 'frame' && b.type === 'frame') return 1;
-              return 0;
+              return (a.zIndex ?? 0) - (b.zIndex ?? 0);
             })
             .map((obj) => {
               const remoteXform = remoteTransformByObjectId[obj.id];
@@ -1783,7 +1802,7 @@ export function Canvas({
           />
         )}
         {/* Connection-point X overlays — use display object so X's stick during drag/transform */}
-        {objects.filter(o => o.type !== 'frame').map(o => {
+        {visibleObjects.filter(o => o.type !== 'frame').map(o => {
           const showXs = (hoveredShapeId === o.id || drawingConnection !== null) && !isDraggingNode;
           if (!showXs) return null;
           const isSelected = selectedObjectIds.includes(o.id);

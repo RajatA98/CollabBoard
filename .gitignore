@@ -67,6 +67,18 @@ node_modules/
 .env.local
 .env.*.local
 
+# Firebase / functions env (secrets)
+functions/.env
+functions/.env.*
+
+# Playwright and test artifacts
+playwright-report/
+test-results/
+.blob-report/
+CollabBoard/playwright-report/
+CollabBoard/test-results/
+CollabBoard/playwright/.cache/
+
 # Build output
 dist/
 dist-ssr/
