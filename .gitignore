@@ -66,6 +66,8 @@ node_modules/
 .env
 .env.local
 .env.*.local
+# Firebase Functions project-specific env (e.g. .env.collabboard-fe299)
+functions/.env.*
 
 # Firebase / functions env (secrets)
 functions/.env

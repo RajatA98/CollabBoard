@@ -8,3 +8,6 @@ typings/
 # Node.js dependency directory
 node_modules/
 *.local
+
+# Project-specific env (e.g. .env.collabboard-fe299)
+.env.*
