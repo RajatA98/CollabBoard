@@ -155,4 +155,52 @@ describe('ShapeSidebar', () => {
 
     expect(stickyTemplate).toBeInTheDocument();
   });
+
+  it('should render cursor and hand mode buttons', () => {
+    render(<ShapeSidebar />);
+    expect(screen.getByTestId('tool-cursor')).toBeInTheDocument();
+    expect(screen.getByTestId('tool-hand')).toBeInTheDocument();
+  });
+
+  it('should highlight cursor button when canvasMode is cursor', () => {
+    render(<ShapeSidebar canvasMode="cursor" />);
+    const cursorBtn = screen.getByTestId('tool-cursor');
+    expect(cursorBtn).toHaveClass('shape-bar-btn-active');
+  });
+
+  it('should highlight hand button when canvasMode is grab', () => {
+    render(<ShapeSidebar canvasMode="grab" />);
+    const handBtn = screen.getByTestId('tool-hand');
+    expect(handBtn).toHaveClass('shape-bar-btn-active');
+  });
+
+  it('should call onCanvasModeChange when hand button is clicked', () => {
+    const onCanvasModeChange = vi.fn();
+    render(<ShapeSidebar canvasMode="cursor" onCanvasModeChange={onCanvasModeChange} />);
+    fireEvent.click(screen.getByTestId('tool-hand'));
+    expect(onCanvasModeChange).toHaveBeenCalledWith('grab');
+  });
+
+  it('should call onCanvasModeChange when cursor button is clicked', () => {
+    const onCanvasModeChange = vi.fn();
+    render(<ShapeSidebar canvasMode="grab" onCanvasModeChange={onCanvasModeChange} />);
+    fireEvent.click(screen.getByTestId('tool-cursor'));
+    expect(onCanvasModeChange).toHaveBeenCalledWith('cursor');
+  });
+
+  it('should render cursor and hand buttons before sticky note button', () => {
+    render(<ShapeSidebar />);
+    const cursor = screen.getByTestId('tool-cursor');
+    const hand = screen.getByTestId('tool-hand');
+    const sticky = screen.getByTestId('shape-template-sticky');
+    expect(cursor.compareDocumentPosition(hand)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(hand.compareDocumentPosition(sticky)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it('should render divider between mode buttons and shape buttons', () => {
+    render(<ShapeSidebar />);
+    const sidebar = screen.getByTestId('shape-sidebar');
+    const divider = sidebar.querySelector('.shape-sidebar-divider');
+    expect(divider).toBeInTheDocument();
+  });
 });

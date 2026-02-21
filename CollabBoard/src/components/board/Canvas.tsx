@@ -70,6 +70,8 @@ interface CanvasProps {
   remoteEditings?: Record<string, LiveEditingData>;
   onBroadcastTransform?: (objectId: string, x: number, y: number, width: number, height: number, rotation: number) => void;
   onClearTransform?: () => void;
+  /** Current canvas interaction mode: 'cursor' for select/marquee, 'grab' for pan */
+  canvasMode?: 'cursor' | 'grab';
   /** When true, stage panning is disabled so HTML5 drop from sidebar is not stolen. */
   isDraggingShapeFromSidebar?: boolean;
   /** Notify parent which object IDs just started dragging (so Firestore snapshots don't reset their positions). */
@@ -235,6 +237,7 @@ export function Canvas({
   remoteEditings = {},
   onBroadcastTransform,
   onClearTransform,
+  canvasMode = 'cursor',
   isDraggingShapeFromSidebar = false,
   onDragStart,
   onDragEnd,
@@ -260,6 +263,8 @@ export function Canvas({
   const dragStartPositionsRef = useRef<Map<string, { x: number; y: number }> | null>(null);
   const [isMiddleMouseDown, setIsMiddleMouseDown] = useState(false);
   const middleMousePanStartRef = useRef<{ pointerX: number; pointerY: number; viewportX: number; viewportY: number } | null>(null);
+  const [isGrabPanning, setIsGrabPanning] = useState(false);
+  const grabPanStartRef = useRef<{ pointerX: number; pointerY: number; viewportX: number; viewportY: number } | null>(null);
   const [isMarqueeSelecting, setIsMarqueeSelecting] = useState(false);
   const [marqueeStart, setMarqueeStart] = useState<{ x: number; y: number } | null>(null);
   const [marqueeEnd, setMarqueeEnd] = useState<{ x: number; y: number } | null>(null);
@@ -366,12 +371,51 @@ export function Canvas({
     };
   }, [isMiddleMouseDown, setPosition]);
 
+  // Grab-mode left-click pan (same pattern as middle-mouse pan above)
+  useEffect(() => {
+    if (!isGrabPanning) return;
+    const prevCursor = document.body.style.cursor;
+    document.body.style.cursor = 'grabbing';
+    const onWindowMouseMove = (e: MouseEvent) => {
+      const start = grabPanStartRef.current;
+      if (!start) return;
+      const dx = e.clientX - start.pointerX;
+      const dy = e.clientY - start.pointerY;
+      setPosition(start.viewportX + dx, start.viewportY + dy);
+    };
+    const onWindowMouseUp = (e: MouseEvent) => {
+      if (e.button === 0) {
+        grabPanStartRef.current = null;
+        setIsGrabPanning(false);
+      }
+    };
+    window.addEventListener('mousemove', onWindowMouseMove);
+    window.addEventListener('mouseup', onWindowMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onWindowMouseMove);
+      window.removeEventListener('mouseup', onWindowMouseUp);
+      document.body.style.cursor = prevCursor;
+    };
+  }, [isGrabPanning, setPosition]);
+
   const handleStageMouseDown = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
       if (e.evt.button === 1) {
         e.evt.preventDefault();
         setIsMiddleMouseDown(true);
         middleMousePanStartRef.current = {
+          pointerX: e.evt.clientX,
+          pointerY: e.evt.clientY,
+          viewportX: viewport.x,
+          viewportY: viewport.y,
+        };
+        return;
+      }
+      // Grab mode: left-click starts pan (same logic as middle mouse)
+      if (canvasMode === 'grab' && e.evt.button === 0) {
+        e.evt.preventDefault();
+        setIsGrabPanning(true);
+        grabPanStartRef.current = {
           pointerX: e.evt.clientX,
           pointerY: e.evt.clientY,
           viewportX: viewport.x,
@@ -394,7 +438,7 @@ export function Canvas({
       setMarqueeStart(worldPos);
       setMarqueeEnd(worldPos);
     },
-    [getWorldPointer, viewport]
+    [getWorldPointer, viewport, canvasMode]
   );
 
   const handleStageMouseMove = useCallback(
@@ -754,6 +798,7 @@ export function Canvas({
 
   const handleStageClick = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
+      if (canvasMode === 'grab') return; // No selection interaction in grab mode
       const stage = e.target.getStage();
       const target = e.target;
       const isStage = target === stage;
@@ -769,7 +814,7 @@ export function Canvas({
         onLastClickPosition({ x: worldX, y: worldY });
       }
     },
-    [viewport, onLastClickPosition, onClearSelection, onCanvasClick]
+    [viewport, onLastClickPosition, onClearSelection, onCanvasClick, canvasMode]
   );
 
   const handleStageContextMenu = useCallback(
@@ -1255,7 +1300,7 @@ export function Canvas({
   }, [objects, selectedObjectIds]);
 
   return (
-    <div style={{ width: '100%', height: '100%', pointerEvents: isDraggingShapeFromSidebar ? 'none' : 'auto' }}>
+    <div style={{ width: '100%', height: '100%', pointerEvents: isDraggingShapeFromSidebar ? 'none' : 'auto', cursor: canvasMode === 'grab' ? (isGrabPanning ? 'grabbing' : 'grab') : undefined }}>
     <Stage
       ref={stageRef}
       width={stageSize.width}
