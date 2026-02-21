@@ -1,0 +1,10 @@
+node_modules
+.git
+.env
+.env.*
+*.log
+.firebase
+CollabBoard/node_modules
+CollabBoard/dist
+CollabBoard/playwright-report
+functions/lib

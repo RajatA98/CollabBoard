@@ -35,6 +35,9 @@ function sanitizeUpdates(updates: Partial<BoardObject>, existing?: BoardObject):
     } else if (key === 'rotation') {
       const v = num(value, def);
       (out as Record<string, number>)[key] = Math.max(-MAX_ROTATION, Math.min(MAX_ROTATION, v));
+    } else if (key === 'zIndex') {
+      const v = num(value, def);
+      if (Number.isFinite(v)) (out as Record<string, number>)[key] = v;
     } else if (key === 'fontSize' || key === 'strokeWidth' || key === 'aspectRatio' || key === 'createdAt' || key === 'updatedAt') {
       const v = num(value, def);
       if (Number.isFinite(v)) (out as Record<string, number>)[key] = v;
@@ -90,6 +93,7 @@ function normalizeBoardObject(raw: Record<string, unknown>, id: string): BoardOb
       : undefined,
     frameId: raw.frameId != null ? str(raw.frameId, '') : undefined,
     aspectRatio: raw.aspectRatio != null ? num(raw.aspectRatio, 1) : undefined,
+    zIndex: num(raw.zIndex, 0),
   };
 }
 

@@ -39,6 +39,8 @@ export interface BoardObject {
   frameId?: string;
   // Original width/height ratio for aspect-ratio preservation on resize
   aspectRatio?: number;
+  // Stacking order: higher values render on top
+  zIndex?: number;
 }
 
 export interface CursorData {

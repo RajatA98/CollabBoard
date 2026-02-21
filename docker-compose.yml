@@ -1,0 +1,20 @@
+# Run AI Assistant (Firebase Functions emulator) with tracing env loaded.
+# Usage:
+#   1. Ensure .env exists at repo root with ANTHROPIC_API_KEY, LANGFUSE_*, etc.
+#   2. docker compose --env-file .env up --build
+#   3. In app, point to the emulator (see DEBUGGING.md).
+services:
+  functions-emulator:
+    build:
+      context: .
+      dockerfile: Dockerfile.functions
+    env_file: .env
+    environment:
+      - FUNCTIONS_EMULATOR=true
+      # Use your real project so Firestore/RTDB calls hit collabboard-fe299 (set in .env as VITE_FIREBASE_PROJECT_ID)
+      - GCLOUD_PROJECT=${VITE_FIREBASE_PROJECT_ID:-collabboard-fe299}
+    ports:
+      - "5001:5001"
+    # Optional: mount source for live code changes without rebuild
+    # volumes:
+    #   - ./functions:/app/functions

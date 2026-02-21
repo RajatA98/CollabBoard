@@ -1,0 +1,20 @@
+# Run Firebase Functions emulator with your .env (use with docker-compose and env_file)
+FROM node:24-bookworm-slim
+
+RUN npm install -g firebase-tools
+
+WORKDIR /app
+
+# Project layout
+COPY firebase.json firebase.*.json* ./
+COPY database.rules.json ./
+COPY firestore.rules firestore.indexes.json ./
+COPY functions/ ./functions/
+
+WORKDIR /app/functions
+RUN npm ci && npm run build
+
+WORKDIR /app
+EXPOSE 5001
+
+CMD ["firebase", "emulators:start", "--only", "functions"]

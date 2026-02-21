@@ -16,7 +16,7 @@ import type { BoardObject } from '../types';
 function sanitizePayload(updates: Partial<BoardObject>): Record<string, unknown> {
   const numericKeys = new Set([
     'x', 'y', 'width', 'height', 'rotation', 'createdAt', 'updatedAt',
-    'fontSize', 'strokeWidth', 'aspectRatio',
+    'fontSize', 'strokeWidth', 'aspectRatio', 'zIndex',
   ]);
   const payload: Record<string, unknown> = { updatedAt: serverTimestamp() };
   for (const [key, value] of Object.entries(updates)) {
@@ -65,19 +65,23 @@ export async function updateObject(boardId: string, objectId: string, updates: P
   await updateDoc(ref, payload);
 }
 
-/** Update multiple objects in a single batch (one round-trip, one snapshot). Use for frame + children to reduce lag. */
+/** Update multiple objects in batched commits to respect Firestore's 500-op limit. */
 export async function updateObjectsBatch(
   boardId: string,
   updates: Array<{ objectId: string; updates: Partial<BoardObject> }>
 ) {
   if (updates.length === 0) return;
-  const batch = writeBatch(db);
-  for (const { objectId, updates: ups } of updates) {
-    const ref = doc(db, 'boards', boardId, 'objects', objectId);
-    const payload = sanitizePayload(ups);
-    batch.update(ref, payload);
+  const CHUNK_SIZE = 450;
+  for (let i = 0; i < updates.length; i += CHUNK_SIZE) {
+    const batch = writeBatch(db);
+    const chunk = updates.slice(i, i + CHUNK_SIZE);
+    for (const { objectId, updates: ups } of chunk) {
+      const ref = doc(db, 'boards', boardId, 'objects', objectId);
+      const payload = sanitizePayload(ups);
+      batch.update(ref, payload);
+    }
+    await batch.commit();
   }
-  await batch.commit();
 }
 
 export async function deleteObject(boardId: string, objectId: string) {

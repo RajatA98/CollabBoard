@@ -46,6 +46,7 @@ function getRectPoints(obj: BoardObject): ConnectionPoint[] {
   const rot = num(obj.rotation, 0);
 
   const raw = [
+    { id: 'center', x: x + w / 2, y: y + h / 2, direction: 'top' as const },
     { id: 'top-left', x, y, direction: 'top' as const },
     { id: 'top', x: x + w / 2, y, direction: 'top' as const },
     { id: 'top-right', x: x + w, y, direction: 'top' as const },
@@ -78,8 +79,10 @@ function getCirclePoints(obj: BoardObject): ConnectionPoint[] {
   const cx = x + rx;
   const cy = y + ry;
 
+  const pts: ConnectionPoint[] = [
+    { id: 'center', x: cx, y: cy, direction: 'top' as const },
+  ];
   const ids = ['right', 'bottom-right', 'bottom', 'bottom-left', 'left', 'top-left', 'top', 'top-right'];
-  const pts: ConnectionPoint[] = [];
   for (let i = 0; i < 8; i++) {
     const angleDeg = i * 45;
     const angleRad = (angleDeg * Math.PI) / 180;
@@ -101,21 +104,60 @@ function getCirclePoints(obj: BoardObject): ConnectionPoint[] {
 }
 
 /**
- * 2 connection points for lines: start and end.
+ * Connection points for lines: start, optional center (straight lines only),
+ * optional bend points (waypoints), and end. Directions use segment tangents.
  */
 function getLinePoints(obj: BoardObject): ConnectionPoint[] {
   const x = num(obj.x, 0);
   const y = num(obj.y, 0);
   const dx = num(obj.width, 0);
   const dy = num(obj.height, 0);
-  const angle = Math.atan2(dy, dx);
-  const startDir = directionFromAngle(((angle + Math.PI) * 180) / Math.PI);
-  const endDir = directionFromAngle((angle * 180) / Math.PI);
+  const start = { x, y };
+  const end = { x: x + dx, y: y + dy };
+  const waypoints = obj.waypoints && obj.waypoints.length > 0
+    ? obj.waypoints.map((w) => ({ x: num(w.x, x), y: num(w.y, y) }))
+    : [];
 
-  return [
-    { id: 'start', x, y, direction: startDir },
-    { id: 'end', x: x + dx, y: y + dy, direction: endDir },
-  ];
+  const pts: ConnectionPoint[] = [];
+
+  // Start: direction from first segment (start → first waypoint or end)
+  const firstNext = waypoints.length > 0 ? waypoints[0] : end;
+  const startAngleDeg = (Math.atan2(firstNext.y - start.y, firstNext.x - start.x) * 180) / Math.PI;
+  const startDir = directionFromAngle((startAngleDeg + 360) % 360);
+  pts.push({ id: 'start', x: start.x, y: start.y, direction: startDir });
+
+  if (waypoints.length === 0) {
+    // Straight line: add center at midpoint
+    const centerDir = directionFromAngle((Math.atan2(dy, dx) * 180) / Math.PI);
+    pts.push({
+      id: 'center',
+      x: x + dx / 2,
+      y: y + dy / 2,
+      direction: centerDir,
+    });
+  } else {
+    // Bent line: one connection point per waypoint with tangent direction (prev → next)
+    for (let i = 0; i < waypoints.length; i++) {
+      const prev = i === 0 ? start : waypoints[i - 1];
+      const next = i === waypoints.length - 1 ? end : waypoints[i + 1];
+      const angleDeg = (Math.atan2(next.y - prev.y, next.x - prev.x) * 180) / Math.PI;
+      const dir = directionFromAngle((angleDeg + 360) % 360);
+      pts.push({
+        id: `bend-${i}`,
+        x: waypoints[i].x,
+        y: waypoints[i].y,
+        direction: dir,
+      });
+    }
+  }
+
+  // End: direction from last segment (last waypoint or start → end)
+  const lastPrev = waypoints.length > 0 ? waypoints[waypoints.length - 1] : start;
+  const endAngleDeg = (Math.atan2(end.y - lastPrev.y, end.x - lastPrev.x) * 180) / Math.PI;
+  const endDir = directionFromAngle((endAngleDeg + 360) % 360);
+  pts.push({ id: 'end', x: end.x, y: end.y, direction: endDir });
+
+  return pts;
 }
 
 /**
@@ -179,7 +221,10 @@ function getPolygonPoints(obj: BoardObject, localVerts: { x: number; y: number }
     return directionFromAngle(deg);
   };
 
-  const pts: ConnectionPoint[] = [];
+  const centerWorld = toWorld(centroidX, centroidY);
+  const pts: ConnectionPoint[] = [
+    { id: 'center', x: centerWorld.x, y: centerWorld.y, direction: 'top' as const },
+  ];
 
   for (let i = 0; i < n; i++) {
     const v = localVerts[i];

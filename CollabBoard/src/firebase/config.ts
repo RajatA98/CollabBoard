@@ -2,6 +2,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getDatabase } from 'firebase/database';
+import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -18,4 +19,12 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const rtdb = getDatabase(app);
+export const functions = getFunctions(app);
+
+if (import.meta.env.VITE_USE_FUNCTIONS_EMULATOR === 'true') {
+  const host = import.meta.env.VITE_FUNCTIONS_EMULATOR_HOST ?? '127.0.0.1';
+  const port = Number(import.meta.env.VITE_FUNCTIONS_EMULATOR_PORT ?? '5001');
+  connectFunctionsEmulator(functions, host, port);
+}
+
 export default app;

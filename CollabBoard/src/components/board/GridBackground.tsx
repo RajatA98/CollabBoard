@@ -38,6 +38,7 @@ export function GridBackground({ viewport, stageSize }: GridBackgroundProps) {
           points={line.points}
           stroke={GRID_STROKE}
           strokeWidth={GRID_STROKE_WIDTH}
+          strokeScaleEnabled={false}
           listening={false}
         />
       ))}
