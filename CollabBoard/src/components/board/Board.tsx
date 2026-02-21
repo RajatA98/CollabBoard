@@ -1267,14 +1267,29 @@ export function Board() {
           active.tagName === 'SELECT' ||
           (active as HTMLElement).isContentEditable);
       if (isEditingInput) return;
-      // Tool mode shortcuts (V for cursor, H for hand/grab)
+      // Tool mode: V for cursor only (hand has no shortcut)
       if (e.key === 'v' && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
         setCanvasMode('cursor');
         return;
       }
       if (e.key === 'h' && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
         setCanvasMode('grab');
-        setSelectedObjectIds([]);
+        return;
+      }
+      // T = Text, N = Note (sticky) — create at center
+      if (e.key === 't' && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        createObjectAtCenter('text');
+        return;
+      }
+      if (e.key === 'n' && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        createObjectAtCenter('sticky');
+        return;
+      }
+      if (e.key === 'f' && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        createObjectAtCenter('frame');
         return;
       }
       if (e.key === 'a' && (e.metaKey || e.ctrlKey)) {

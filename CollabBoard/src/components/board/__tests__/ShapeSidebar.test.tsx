@@ -156,45 +156,42 @@ describe('ShapeSidebar', () => {
     expect(stickyTemplate).toBeInTheDocument();
   });
 
-  it('should render cursor and hand mode buttons', () => {
+  it('should render single mode toggle button (cursor/hand)', () => {
     render(<ShapeSidebar />);
     expect(screen.getByTestId('tool-cursor')).toBeInTheDocument();
-    expect(screen.getByTestId('tool-hand')).toBeInTheDocument();
   });
 
-  it('should highlight cursor button when canvasMode is cursor', () => {
+  it('should highlight mode button when canvasMode is cursor', () => {
     render(<ShapeSidebar canvasMode="cursor" />);
-    const cursorBtn = screen.getByTestId('tool-cursor');
-    expect(cursorBtn).toHaveClass('shape-bar-btn-active');
+    const btn = screen.getByTestId('tool-cursor');
+    expect(btn).toHaveClass('shape-bar-btn-active');
   });
 
-  it('should highlight hand button when canvasMode is grab', () => {
+  it('should not highlight mode button when canvasMode is grab', () => {
     render(<ShapeSidebar canvasMode="grab" />);
-    const handBtn = screen.getByTestId('tool-hand');
-    expect(handBtn).toHaveClass('shape-bar-btn-active');
+    const btn = screen.getByTestId('tool-cursor');
+    expect(btn).not.toHaveClass('shape-bar-btn-active');
   });
 
-  it('should call onCanvasModeChange when hand button is clicked', () => {
+  it('should call onCanvasModeChange with grab when clicked in cursor mode', () => {
     const onCanvasModeChange = vi.fn();
     render(<ShapeSidebar canvasMode="cursor" onCanvasModeChange={onCanvasModeChange} />);
-    fireEvent.click(screen.getByTestId('tool-hand'));
+    fireEvent.click(screen.getByTestId('tool-cursor'));
     expect(onCanvasModeChange).toHaveBeenCalledWith('grab');
   });
 
-  it('should call onCanvasModeChange when cursor button is clicked', () => {
+  it('should call onCanvasModeChange with cursor when clicked in grab mode', () => {
     const onCanvasModeChange = vi.fn();
     render(<ShapeSidebar canvasMode="grab" onCanvasModeChange={onCanvasModeChange} />);
     fireEvent.click(screen.getByTestId('tool-cursor'));
     expect(onCanvasModeChange).toHaveBeenCalledWith('cursor');
   });
 
-  it('should render cursor and hand buttons before sticky note button', () => {
+  it('should render mode button before sticky note button', () => {
     render(<ShapeSidebar />);
     const cursor = screen.getByTestId('tool-cursor');
-    const hand = screen.getByTestId('tool-hand');
     const sticky = screen.getByTestId('shape-template-sticky');
-    expect(cursor.compareDocumentPosition(hand)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(hand.compareDocumentPosition(sticky)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(cursor.compareDocumentPosition(sticky)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it('should render divider between mode buttons and shape buttons', () => {

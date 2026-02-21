@@ -235,24 +235,15 @@ export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({
   return (
     <div className="shape-sidebar" data-testid="shape-sidebar" role="group" aria-label="Shape tools">
       <div className="shape-sidebar-tools">
-        {/* Mode buttons */}
+        {/* Single mode button: cursor (on) vs hand (off). V = cursor, H = hand. */}
         <TooltipButton
-          label="Select"
-          shortcut="V"
-          icon={<CursorIcon />}
-          onClick={() => onCanvasModeChange?.('cursor')}
+          label={canvasMode === 'cursor' ? 'Select' : 'Hand'}
+          shortcut={canvasMode === 'cursor' ? 'V' : 'H'}
+          icon={canvasMode === 'cursor' ? <CursorIcon /> : <HandIcon />}
+          onClick={() => onCanvasModeChange?.(canvasMode === 'cursor' ? 'grab' : 'cursor')}
           data-testid="tool-cursor"
-          aria-label="Select"
+          aria-label={canvasMode === 'cursor' ? 'Select' : 'Hand'}
           active={canvasMode === 'cursor'}
-        />
-        <TooltipButton
-          label="Hand"
-          shortcut="H"
-          icon={<HandIcon />}
-          onClick={() => onCanvasModeChange?.('grab')}
-          data-testid="tool-hand"
-          aria-label="Hand"
-          active={canvasMode === 'grab'}
         />
 
         {/* Divider between mode tools and shape tools */}
@@ -261,6 +252,7 @@ export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({
         {/* Sticky note */}
         <TooltipButton
           label="Sticky note"
+          shortcut="N"
           icon={<StickyIcon />}
           onClick={() => handleClick('sticky')}
           draggable
@@ -274,6 +266,7 @@ export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({
         {/* Text */}
         <TooltipButton
           label="Text"
+          shortcut="T"
           icon={<TextIcon />}
           onClick={() => handleClick('text')}
           draggable
