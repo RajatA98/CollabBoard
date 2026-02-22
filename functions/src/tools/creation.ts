@@ -1222,3 +1222,99 @@ export async function createConnector(
   await objectsRef(boardId).doc(id).set(obj);
   return {objectId: id, type: "connector"};
 }
+
+/**
+ * Draw a single freehand pen stroke on the board.
+ * Points are provided as absolute board coordinates; internally they are
+ * stored relative to the stroke's origin (first point / bounding-box offset)
+ * to match the format the frontend canvas uses.
+ */
+export async function createPenStroke(
+  boardId: string,
+  userId: string,
+  input: {
+    points: Array<{x: number; y: number}>;
+    color: string;
+    strokeWidth?: number;
+    zIndex?: number;
+  }
+): Promise<{objectId: string; type: string}> {
+  if (!input.points || input.points.length < 2) {
+    throw new Error("createPenStroke: at least 2 points are required.");
+  }
+
+  // Convert absolute points to a flat relative array (origin = first point)
+  const originX = input.points[0].x;
+  const originY = input.points[0].y;
+  const flatPts: number[] = input.points.flatMap((p) => [
+    p.x - originX,
+    p.y - originY,
+  ]);
+
+  // Compute bounding box of relative coords
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (let i = 0; i < flatPts.length; i += 2) {
+    if (flatPts[i] < minX) minX = flatPts[i];
+    if (flatPts[i] > maxX) maxX = flatPts[i];
+    if (flatPts[i + 1] < minY) minY = flatPts[i + 1];
+    if (flatPts[i + 1] > maxY) maxY = flatPts[i + 1];
+  }
+
+  const id = generateId();
+  const now = Date.now();
+  const obj: Record<string, unknown> = {
+    id,
+    type: "pen",
+    x: originX,
+    y: originY,
+    width: Math.max(maxX - minX, 1),
+    height: Math.max(maxY - minY, 1),
+    rotation: 0,
+    color: input.color,
+    strokeWidth: input.strokeWidth ?? 4,
+    points: flatPts,
+    zIndex: input.zIndex ?? 0,
+    createdBy: userId,
+    createdAt: now,
+    updatedAt: now,
+    updatedBy: userId,
+  };
+
+  await objectsRef(boardId).doc(id).set(obj);
+  return {objectId: id, type: "pen"};
+}
+
+const PEN_BULK_MAX = 20;
+
+/**
+ * Draw multiple freehand pen strokes in one call.
+ */
+export async function createPenStrokes(
+  boardId: string,
+  userId: string,
+  input: {
+    strokes: Array<{
+      points: Array<{x: number; y: number}>;
+      color: string;
+      strokeWidth?: number;
+      zIndex?: number;
+    }>;
+  }
+): Promise<{created: number; objectIds: string[]}> {
+  if (!input.strokes || input.strokes.length === 0) {
+    throw new Error("createPenStrokes: strokes array is required.");
+  }
+  if (input.strokes.length > PEN_BULK_MAX) {
+    throw new Error(
+      `createPenStrokes: max ${PEN_BULK_MAX} strokes per call; split into batches.`
+    );
+  }
+
+  const results: string[] = [];
+  for (const strokeSpec of input.strokes) {
+    const {objectId} = await createPenStroke(boardId, userId, strokeSpec);
+    results.push(objectId);
+  }
+
+  return {created: results.length, objectIds: results};
+}

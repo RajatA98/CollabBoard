@@ -12,6 +12,8 @@ import {
   createTextBox,
   createTextBoxes,
   createConnector,
+  createPenStroke,
+  createPenStrokes,
   moveObject,
   moveMultipleObjects,
   resizeObject,
@@ -374,6 +376,16 @@ export async function runAgent(params: {
               const connZ = (baseZIndex ?? 1) + placedRectsThisTurn.length;
               result = await createConnector(boardId, userId, inp, connZ);
               objectsCreated.push(result.objectId);
+              break;
+            }
+            case "createPenStroke": {
+              result = await createPenStroke(boardId, userId, inp);
+              objectsCreated.push(result.objectId);
+              break;
+            }
+            case "createPenStrokes": {
+              result = await createPenStrokes(boardId, userId, inp);
+              objectsCreated.push(...result.objectIds);
               break;
             }
             case "moveObject":

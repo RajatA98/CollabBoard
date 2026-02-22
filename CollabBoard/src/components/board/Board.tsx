@@ -455,6 +455,17 @@ export function Board() {
       });
   }, [addObject, user, pushAction]);
 
+  const handleReplaceStrokes = useCallback((deletions: string[], additions: BoardObject[]) => {
+    if (!user) return;
+    deletions.forEach((id) => deleteObject(id));
+    additions.forEach((stroke) => {
+      const withUser = { ...stroke, updatedBy: user.uid };
+      addObject(withUser).catch((err) => {
+        console.error('Failed to add erased sub-stroke:', err);
+      });
+    });
+  }, [addObject, deleteObject, user]);
+
   const handleCanvasClick = useCallback(() => {
     setContextMenu(null);
     setShapesPanelOpen(false);
@@ -1543,6 +1554,7 @@ export function Board() {
               penColor={penColor}
               penStrokeWidth={penStrokeWidth}
               onAddPenStroke={handleAddPenStroke}
+              onReplaceStrokes={handleReplaceStrokes}
               isDraggingShapeFromSidebar={isDraggingShapeFromSidebar}
             />
         {selectedObject && (

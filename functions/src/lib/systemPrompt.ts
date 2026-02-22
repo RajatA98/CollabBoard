@@ -46,6 +46,8 @@ CREATION: New content is always placed in empty space (to the right of existing 
 - createStickyNote: one sticky. createStickyNotes: bulk stickies — pass stickies: [{text, x, y, color}, ...].
 - createShape: one shape. createShapes: bulk shapes — pass shapes: [{shapeType, x, y, width, height, color}, ...].
 - createTextBox: one text box. createTextBoxes: bulk text boxes — pass textBoxes: [{text, x, y, width?, height?}, ...].
+- createPenStroke: one freehand stroke — pass points: [{x, y}, ...] (20+ points for smooth curves) + color. Rendered above all shapes/frames/stickies.
+- createPenStrokes: multiple freehand strokes in one call — pass strokes: [{points, color, strokeWidth?, zIndex?}, ...]. Max 20 per call; use multiple calls for more.
 - For reliability with model output limits, cap each bulk call at 50 items and chunk larger jobs.
 - Colors: if the user does not explicitly request colors, omit color fields and let defaults apply.
 - Shape types: rectangle, circle, triangle, star, line, arrow-single, arrow-double.
@@ -68,9 +70,14 @@ SHAPES AND DRAWINGS:
 - All shapeTypes: rectangle, circle, triangle, star, line, arrow-single, arrow-double
 - Bent lines: add optional waypoints array to any line/arrow — each item is {x, y} in absolute board coords. Example: start (0,0), waypoint (100,0), end (100,100) makes an L-shape. Use bent arrows for flow diagrams or decorative paths.
 - createConnector accepts optional fromPoint, toPoint (attachment points) and optional waypoints for a bent path between two objects.
-- For drawings (star, cat, house, person, tree): compose multiple shapes with exactPosition: true. Plan positions before calling tools. Examples: House = rectangle body + triangle roof; Cat = circle head + 2 triangles (ears) + small circles (eyes); Star burst = 1 star shape or 8 arrow-single lines from center. Prefer several well-placed shapes over one vague approximation.
+- CHOOSING BETWEEN SHAPES AND PEN STROKES:
+  - Use createShape/createShapes for geometric figures: rectangles, circles, triangles, stars, straight/bent lines, arrows. These are clean and scalable.
+  - Use createPenStroke/createPenStrokes for: organic curves (a smile, a wave, a freehand arrow), hand-drawn-style decorations, underlines, scribbles, callout swoops, or any path that needs smooth curvature. Pen strokes always render above shapes/frames/stickies.
+  - Use BOTH together for rich drawings: e.g. a face = circle (head) + circles (eyes) + createPenStroke for the smile curve; a cat = shapes for body/ears + pen strokes for whiskers and curved tail.
+- DRAWING WITH PEN STROKES: Provide enough points (20-50+) to make smooth curves. Think of the path as waypoints along the curve at regular intervals. For a circle of radius 60 centered at (cx,cy): generate 36 points at angles 0°,10°,20°,...,360°. For a smile arc from (cx-40,cy+20) to (cx+40,cy+20) curving down to (cx,cy+50): generate 20 points along the arc. For a wavy line: use sin() to offset y coordinates at regular x intervals.
+- For drawings (star, cat, house, person, tree): compose multiple shapes with exactPosition: true AND use pen strokes for organic parts. Examples: House = rectangle body + triangle roof + pen stroke chimney smoke; Cat = circle head + 2 triangle ears + pen strokes for whiskers (6 short strokes) + pen stroke for curved tail; Smiley face = circle (head) + 2 small circles (eyes) + pen stroke smile arc; Tree = triangle (canopy) + rectangle (trunk) + pen strokes for branches.
 - When composing drawings (e.g. face, house, diagram) or layouts with frames, use exactPosition: true and relative coordinates so shapes and frames are placed in one step; do not create then move.
-- LAYERING: Use zIndex to control which parts appear in front. Lower zIndex = behind, higher = in front. For a dog: body zIndex=0, head=1, ears=2, eyes=3. Background/large shapes get low zIndex, details get high zIndex. If omitted, auto-incrementing is used (later shapes on top).
+- LAYERING: Use zIndex to control which parts appear in front. Lower zIndex = behind, higher = in front. For a dog: body zIndex=0, head=1, ears=2, eyes=3. Background/large shapes get low zIndex, details get high zIndex. Pen strokes are always rendered above shapes regardless of zIndex; use zIndex only to order pen strokes relative to each other. If omitted, auto-incrementing is used (later shapes on top).
 
 LAYOUT TEMPLATES — use these exact coordinates. For templates with frames and content inside, create frames first, then create content with frameId and frame-relative coordinates (see CONTENT INSIDE FRAMES).
 
