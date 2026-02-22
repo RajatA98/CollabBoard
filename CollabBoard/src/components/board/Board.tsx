@@ -9,6 +9,7 @@ import { UndoRedoClearPanel } from './UndoRedoClearPanel';
 import { StyleBar } from './StyleBar';
 import { ContextMenu } from './ContextMenu';
 import { AICommandPanel } from './AICommandPanel';
+import { Minimap } from './Minimap';
 import { useAuth } from '../../hooks/useAuth';
 import { useBoardObjects } from '../../hooks/useBoardObjects';
 import { useCursors } from '../../hooks/useCursors';
@@ -75,6 +76,7 @@ export function Board() {
     childCount: number;
   } | null>(null);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [stageSize, setStageSize] = useState({ width: window.innerWidth, height: window.innerHeight - 48 });
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef(viewport);
   viewportRef.current = viewport;
@@ -82,6 +84,12 @@ export function Board() {
   useEffect(() => {
     return onBoardMetaChange(boardId, setBoardMeta);
   }, [boardId]);
+
+  useEffect(() => {
+    const handleResize = () => setStageSize({ width: window.innerWidth, height: window.innerHeight - 48 });
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const { pushAction, undo, redo, canUndo, canRedo } = useUndoRedo({
     addObject,
@@ -1442,6 +1450,14 @@ export function Board() {
               </button>
             </div>
           </div>
+          <Minimap
+            objects={objects}
+            viewport={viewport}
+            setPosition={setPosition}
+            containerWidth={stageSize.width}
+            containerHeight={stageSize.height}
+            remoteCursors={cursors}
+          />
           <PresenceBar onlineUsers={onlineUsers} />
           <div
             ref={canvasContainerRef}
