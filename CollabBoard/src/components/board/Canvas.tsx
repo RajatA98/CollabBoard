@@ -515,17 +515,29 @@ export function Canvas({
     (draggedId: string) => {
       setIsDraggingNode(true);
       setHoveredShapeId(null);
-      const idsBeingDragged =
-        selectedObjectIds.includes(draggedId) && selectedObjectIds.length > 1
-          ? selectedObjectIds
-          : [draggedId];
-      onDragStart?.(idsBeingDragged);
 
+      // For frames: always drag children along with the frame even if not yet in selectedObjectIds.
+      // This ensures a click-drag on an unselected frame still moves its children live.
+      const draggedObj = objects.find((o) => o.id === draggedId);
+      let effectiveIds: string[];
       if (selectedObjectIds.includes(draggedId) && selectedObjectIds.length > 1) {
+        effectiveIds = selectedObjectIds;
+      } else if (draggedObj?.type === 'frame') {
+        const childIds = objects.filter((o) => o.frameId === draggedId).map((o) => o.id);
+        effectiveIds = [draggedId, ...childIds];
+        // Also update selection so drag end handles batch correctly
+        onSelectObject(draggedId, false);
+      } else {
+        effectiveIds = [draggedId];
+      }
+
+      onDragStart?.(effectiveIds);
+
+      if (effectiveIds.length > 1) {
         const stage = stageRef.current;
         if (!stage) return;
         const positions = new Map<string, { x: number; y: number }>();
-        selectedObjectIds.forEach((id) => {
+        effectiveIds.forEach((id) => {
           const node = stage.findOne('#' + id);
           if (node) positions.set(id, { x: node.x(), y: node.y() });
         });
@@ -534,23 +546,21 @@ export function Canvas({
         dragStartPositionsRef.current = null;
       }
     },
-    [selectedObjectIds, onDragStart]
+    [selectedObjectIds, onDragStart, objects, onSelectObject]
   );
 
   const handleObjectDragMove = useCallback(
     (draggedId: string, newX: number, newY: number) => {
       const positions = dragStartPositionsRef.current;
-      if (!positions || selectedObjectIds.length <= 1) return;
+      if (!positions || positions.size <= 1) return;
       const startPos = positions.get(draggedId);
       if (!startPos) return;
       const dx = newX - startPos.x;
       const dy = newY - startPos.y;
       const stage = stageRef.current;
       if (!stage) return;
-      selectedObjectIds.forEach((id) => {
+      positions.forEach((pos, id) => {
         if (id === draggedId) return;
-        const pos = positions.get(id);
-        if (!pos) return;
         const node = stage.findOne('#' + id);
         if (node) {
           node.x(pos.x + dx);
@@ -559,36 +569,36 @@ export function Canvas({
       });
       stage.findOne('.konva-transformer')?.getLayer()?.batchDraw();
     },
-    [selectedObjectIds]
+    []
   );
 
   const handleObjectDragEnd = useCallback(
     (draggedId: string, finalX: number, finalY: number) => {
       const positions = dragStartPositionsRef.current;
-      // Unmark before writing so Firestore snapshot after update uses fresh data
-      const idsBeingDragged =
-        positions && selectedObjectIds.length > 1 ? selectedObjectIds : [draggedId];
-      onDragEnd?.(idsBeingDragged);
-      if (!positions || selectedObjectIds.length <= 1) {
+      // Use positions ref as source of truth for dragged IDs (handles click-drag on unselected frames)
+      const draggedIds = positions && positions.size > 1 ? Array.from(positions.keys()) : [draggedId];
+      onDragEnd?.(draggedIds);
+      if (!positions || positions.size <= 1) {
         onObjectUpdate(draggedId, { x: finalX, y: finalY });
+        dragStartPositionsRef.current = null;
         return;
       }
       const startPos = positions.get(draggedId);
-      if (!startPos) return;
+      if (!startPos) { dragStartPositionsRef.current = null; return; }
       const dx = finalX - startPos.x;
       const dy = finalY - startPos.y;
 
-      const selectedIdsSet = new Set(selectedObjectIds);
+      const draggedIdsSet = new Set(draggedIds);
       const buildVirtualShape = (obj: BoardObject): BoardObject => {
         const pos = positions.get(obj.id);
-        if (pos && selectedIdsSet.has(obj.id)) {
+        if (pos && draggedIdsSet.has(obj.id)) {
           return { ...obj, x: pos.x + dx, y: pos.y + dy };
         }
         return obj;
       };
 
       const changes: { id: string; updates: Partial<BoardObject> }[] = [];
-      for (const id of selectedObjectIds) {
+      for (const id of draggedIds) {
         const pos = positions.get(id);
         if (!pos) continue;
         const obj = objects.find(o => o.id === id);
@@ -635,7 +645,7 @@ export function Canvas({
         }
       }
 
-      const shapeUpdates = selectedObjectIds
+      const shapeUpdates = draggedIds
         .filter((id) => {
           const obj = objects.find((o) => o.id === id);
           return obj && obj.type !== 'line';
@@ -655,7 +665,7 @@ export function Canvas({
         })
         .filter((u): u is NonNullable<typeof u> => u != null);
       const lineUpdates = computeConnectedLineUpdates(shapeUpdates, objects).filter(
-        (lu) => !selectedIdsSet.has(lu.id),
+        (lu) => !draggedIdsSet.has(lu.id),
       );
       changes.push(...lineUpdates);
 
@@ -666,7 +676,7 @@ export function Canvas({
       }
       dragStartPositionsRef.current = null;
     },
-    [selectedObjectIds, objects, onObjectUpdate, onBatchObjectUpdate, onDragEnd]
+    [objects, onObjectUpdate, onBatchObjectUpdate, onDragEnd]
   );
 
   const handleMultiSelectMarqueeDragStart = useCallback(
