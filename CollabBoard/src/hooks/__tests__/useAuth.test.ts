@@ -18,6 +18,11 @@ vi.mock('../../firebase/auth', () => ({
   signOut: vi.fn(),
 }));
 
+vi.mock('../../firebase/users', () => ({
+  onUserProfileChange: vi.fn(() => vi.fn()),
+  callEnsureUserProfile: vi.fn(() => Promise.resolve({ success: true, created: false })),
+}));
+
 describe('useAuth', () => {
   beforeEach(() => {
     vi.clearAllMocks();

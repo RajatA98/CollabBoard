@@ -91,6 +91,47 @@ export interface AppUser {
   uid: string;
   email: string;
   displayName: string;
+  username?: string;
+  avatarColor?: string;
+}
+
+export interface UserProfile {
+  uid: string;
+  email: string;
+  displayName: string;
+  username?: string;
+  displayNameLower: string;
+  avatarColor: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface FriendData {
+  status: 'pending_sent' | 'pending_received' | 'accepted';
+  since: number;
+  displayName: string;
+  username: string;
+  avatarUrl: string | null;
+  avatarColor: string;
+}
+
+export interface BoardInvitation {
+  boardId: string;
+  boardName: string;
+  invitedBy: string;
+  invitedByName: string;
+  invitedByUsername: string;
+  invitedByAvatarColor: string;
+  role: 'editor' | 'viewer';
+  status: 'pending' | 'accepted' | 'declined';
+  createdAt: number;
+}
+
+export interface CollaboratorEntry {
+  role: 'editor' | 'viewer';
+  status: 'pending' | 'accepted';
+  invitedAt: number;
+  invitedBy: string;
 }
 
 export interface BoardMeta {
@@ -102,5 +143,7 @@ export interface BoardMeta {
   memberNames: Record<string, string>;
   createdAt: number;
   updatedAt: number;
-  visibility: 'open';
+  visibility: 'open' | 'private';
+  collaborators?: Record<string, CollaboratorEntry>;
+  collaboratorUids?: string[];
 }

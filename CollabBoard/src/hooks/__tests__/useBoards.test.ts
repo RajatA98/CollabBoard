@@ -107,7 +107,7 @@ describe('useBoards', () => {
       expect(board).toEqual(sampleBoard);
     });
 
-    expect(mockCreateBoard).toHaveBeenCalledWith('New Board', 'user-1', 'Test User');
+    expect(mockCreateBoard).toHaveBeenCalledWith('New Board', 'user-1', 'Test User', 'private');
   });
 
   it('should call joinBoard with correct parameters', async () => {

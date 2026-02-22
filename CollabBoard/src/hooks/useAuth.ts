@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../firebase/config';
 import { signIn, signUp, signInWithGoogle, signOut } from '../firebase/auth';
+import { onUserProfileChange, callEnsureUserProfile } from '../firebase/users';
 import type { AppUser } from '../types';
 
 function getAuthErrorMessage(err: unknown, fallback: string) {
@@ -30,21 +31,55 @@ export function useAuth() {
   const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const profileUnsubRef = useRef<(() => void) | null>(null);
+  const ensuredRef = useRef(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      if (profileUnsubRef.current) {
+        profileUnsubRef.current();
+        profileUnsubRef.current = null;
+      }
+
       if (firebaseUser) {
-        setUser({
+        const baseUser: AppUser = {
           uid: firebaseUser.uid,
           email: firebaseUser.email ?? '',
           displayName: firebaseUser.displayName ?? '',
+        };
+        setUser(baseUser);
+        setLoading(false);
+
+        if (!ensuredRef.current) {
+          ensuredRef.current = true;
+          callEnsureUserProfile().catch((err) => {
+            console.error('Failed to ensure user profile:', err);
+          });
+        }
+
+        profileUnsubRef.current = onUserProfileChange(firebaseUser.uid, (profile) => {
+          if (profile) {
+            setUser((prev) => prev ? {
+              ...prev,
+              username: profile.username,
+              avatarColor: profile.avatarColor,
+              displayName: profile.displayName || prev.displayName,
+            } : prev);
+          }
         });
       } else {
         setUser(null);
+        ensuredRef.current = false;
       }
       setLoading(false);
     });
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      if (profileUnsubRef.current) {
+        profileUnsubRef.current();
+        profileUnsubRef.current = null;
+      }
+    };
   }, []);
 
   const clearError = useCallback(() => setError(null), []);

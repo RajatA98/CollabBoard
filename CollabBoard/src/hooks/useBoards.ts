@@ -9,10 +9,13 @@ import {
 } from '../firebase/boardMeta';
 import type { BoardMeta, AppUser } from '../types';
 
+export type BoardFilter = 'all' | 'owned' | 'shared';
+
 export function useBoards(user: AppUser | null) {
   const [myBoards, setMyBoards] = useState<BoardMeta[]>([]);
   const [openBoards, setOpenBoards] = useState<BoardMeta[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<BoardFilter>('all');
 
   useEffect(() => {
     if (!user) {
@@ -40,9 +43,9 @@ export function useBoards(user: AppUser | null) {
   }, [user]);
 
   const createBoard = useCallback(
-    async (name: string) => {
+    async (name: string, visibility: 'open' | 'private' = 'private') => {
       if (!user) throw new Error('Not authenticated');
-      return fbCreateBoard(name, user.uid, user.displayName || user.email);
+      return fbCreateBoard(name, user.uid, user.displayName || user.email, visibility);
     },
     [user]
   );
@@ -75,5 +78,23 @@ export function useBoards(user: AppUser | null) {
     (b) => user && !b.members.includes(user.uid)
   );
 
-  return { myBoards, joinableBoards, loading, createBoard, joinBoard, leaveBoard, deleteBoard };
+  const filteredBoards = myBoards.filter((b) => {
+    if (!user) return false;
+    if (filter === 'owned') return b.creatorId === user.uid;
+    if (filter === 'shared') return b.creatorId !== user.uid;
+    return true;
+  });
+
+  return {
+    myBoards: filteredBoards,
+    allMyBoards: myBoards,
+    joinableBoards,
+    loading,
+    filter,
+    setFilter,
+    createBoard,
+    joinBoard,
+    leaveBoard,
+    deleteBoard,
+  };
 }

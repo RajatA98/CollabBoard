@@ -6,6 +6,16 @@ import {defineSecret, defineString} from "firebase-functions/params";
 import {onCall, HttpsError} from "firebase-functions/v2/https";
 import {runAgent} from "./lib/agentRunner.js";
 
+// Username & profile functions
+export {claimUsername, checkUsernameAvailable} from "./username.js";
+export {ensureUserProfile} from "./userProfile.js";
+
+// Friends functions
+export {sendFriendRequest, respondFriendRequest, removeFriend} from "./friends.js";
+
+// Board invitation functions
+export {inviteCollaborator, respondBoardInvitation, removeCollaborator} from "./boardInvitations.js";
+
 // Load .env from repo root when running locally (emulator or Docker). Never throw so Cloud Run can start.
 try {
   const cwd = process.cwd();

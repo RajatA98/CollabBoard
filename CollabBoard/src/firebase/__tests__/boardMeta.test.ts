@@ -58,7 +58,9 @@ describe('boardMeta helpers', () => {
     expect(board.creatorName).toBe('User One');
     expect(board.members).toEqual(['user-1']);
     expect(board.memberNames).toEqual({ 'user-1': 'User One' });
-    expect(board.visibility).toBe('open');
+    expect(board.visibility).toBe('private');
+    expect(board.collaborators).toEqual({});
+    expect(board.collaboratorUids).toEqual(['user-1']);
     expect(mockSetDoc).toHaveBeenCalled();
   });
 
