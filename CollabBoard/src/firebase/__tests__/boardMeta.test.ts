@@ -14,6 +14,18 @@ const mockOnSnapshot = vi.fn();
 const mockServerTimestamp = vi.fn(() => 'SERVER_TIMESTAMP');
 const mockClearObjects = vi.fn().mockResolvedValue(undefined);
 
+class MockTimestamp {
+  seconds: number;
+  nanoseconds: number;
+  constructor(seconds: number, nanoseconds: number) {
+    this.seconds = seconds;
+    this.nanoseconds = nanoseconds;
+  }
+  toMillis() {
+    return this.seconds * 1000 + Math.floor(this.nanoseconds / 1e6);
+  }
+}
+
 vi.mock('firebase/firestore', () => ({
   setDoc: (...args: unknown[]) => mockSetDoc(...args),
   updateDoc: (...args: unknown[]) => mockUpdateDoc(...args),
@@ -27,6 +39,7 @@ vi.mock('firebase/firestore', () => ({
   arrayRemove: (...args: unknown[]) => mockArrayRemove(...args),
   onSnapshot: (...args: unknown[]) => mockOnSnapshot(...args),
   serverTimestamp: () => mockServerTimestamp(),
+  Timestamp: MockTimestamp,
 }));
 
 vi.mock('../config', () => ({

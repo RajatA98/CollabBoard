@@ -5,11 +5,13 @@ interface BoardCardProps {
   actionLabel: string;
   onAction: () => void;
   onDelete?: () => void;
+  onLeave?: () => void;
 }
 
-export function BoardCard({ board, actionLabel, onAction, onDelete }: BoardCardProps) {
+export function BoardCard({ board, actionLabel, onAction, onDelete, onLeave }: BoardCardProps) {
   const memberCount = board.members.length;
-  const createdDate = new Date(board.createdAt).toLocaleDateString();
+  const parsed = new Date(board.createdAt);
+  const createdDate = Number.isFinite(parsed.getTime()) ? parsed.toLocaleDateString() : '';
 
   return (
     <div className="board-card" data-testid="board-card">
@@ -27,6 +29,17 @@ export function BoardCard({ board, actionLabel, onAction, onDelete }: BoardCardP
         <button className="board-card-action" onClick={onAction}>
           {actionLabel}
         </button>
+        {onLeave && (
+          <button
+            type="button"
+            className="board-card-leave"
+            onClick={onLeave}
+            aria-label="Leave board"
+            data-testid="leave-board-btn"
+          >
+            Leave
+          </button>
+        )}
         {onDelete && (
           <button
             type="button"

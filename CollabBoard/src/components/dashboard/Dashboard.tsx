@@ -10,7 +10,7 @@ type Tab = 'my-boards' | 'join-board';
 
 export function Dashboard() {
   const { user, logout } = useAuth();
-  const { myBoards, joinableBoards, loading, createBoard, joinBoard, deleteBoard } = useBoards(user);
+  const { myBoards, joinableBoards, loading, createBoard, joinBoard, leaveBoard, deleteBoard } = useBoards(user);
   const [activeTab, setActiveTab] = useState<Tab>('my-boards');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const navigate = useNavigate();
@@ -42,6 +42,19 @@ export function Dashboard() {
   const handleLogout = useCallback(async () => {
     await logout();
   }, [logout]);
+
+  const handleLeaveBoard = useCallback(
+    async (boardId: string, boardName: string) => {
+      if (!window.confirm(`Leave "${boardName}"? You can rejoin later from the Join Board tab.`)) return;
+      try {
+        await leaveBoard(boardId);
+      } catch (err) {
+        console.error('Failed to leave board:', err);
+        window.alert('Failed to leave board.');
+      }
+    },
+    [leaveBoard]
+  );
 
   const handleDeleteBoard = useCallback(
     async (boardId: string, boardName: string) => {
@@ -110,6 +123,11 @@ export function Dashboard() {
                       board={board}
                       actionLabel="Open"
                       onAction={() => handleOpenBoard(board.id)}
+                      onLeave={
+                        board.creatorId !== user?.uid
+                          ? () => handleLeaveBoard(board.id, board.name || 'Untitled')
+                          : undefined
+                      }
                       onDelete={
                         board.creatorId === user?.uid
                           ? () => handleDeleteBoard(board.id, board.name || 'Untitled')

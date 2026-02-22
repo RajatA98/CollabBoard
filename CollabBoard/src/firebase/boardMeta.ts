@@ -11,10 +11,28 @@ import {
   arrayRemove,
   serverTimestamp,
   onSnapshot,
+  Timestamp,
 } from 'firebase/firestore';
 import { db } from './config';
 import { clearObjects } from './firestore';
 import type { BoardMeta } from '../types';
+
+/** Convert a Firestore Timestamp (or null/undefined) to epoch millis. */
+function toMillis(value: unknown): number {
+  if (value instanceof Timestamp) return value.toMillis();
+  if (typeof value === 'number') return value;
+  return 0;
+}
+
+/** Safely convert raw Firestore document data to a BoardMeta with numeric timestamps. */
+function toBoardMeta(data: Record<string, unknown>, id: string): BoardMeta {
+  return {
+    ...data,
+    id,
+    createdAt: toMillis(data.createdAt),
+    updatedAt: toMillis(data.updatedAt),
+  } as BoardMeta;
+}
 
 export async function createBoard(
   name: string,
@@ -72,7 +90,7 @@ export async function getBoardMeta(
   const ref = doc(db, 'boardMeta', boardId);
   const snap = await getDoc(ref);
   if (!snap.exists()) return null;
-  return { ...snap.data(), id: snap.id } as BoardMeta;
+  return toBoardMeta(snap.data() as Record<string, unknown>, snap.id);
 }
 
 export async function updateBoardName(
@@ -106,7 +124,7 @@ export function onBoardMetaChange(
       callback(null);
       return;
     }
-    callback({ ...snapshot.data(), id: snapshot.id } as BoardMeta);
+    callback(toBoardMeta(snapshot.data() as Record<string, unknown>, snapshot.id));
   });
 }
 
@@ -120,7 +138,7 @@ export function onMyBoardsChange(
   );
   return onSnapshot(q, (snapshot) => {
     const boards = snapshot.docs.map(
-      (d) => ({ ...d.data(), id: d.id }) as BoardMeta
+      (d) => toBoardMeta(d.data() as Record<string, unknown>, d.id)
     );
     callback(boards);
   });
@@ -135,7 +153,7 @@ export function onOpenBoardsChange(
   );
   return onSnapshot(q, (snapshot) => {
     const boards = snapshot.docs.map(
-      (d) => ({ ...d.data(), id: d.id }) as BoardMeta
+      (d) => toBoardMeta(d.data() as Record<string, unknown>, d.id)
     );
     callback(boards);
   });

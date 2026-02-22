@@ -196,6 +196,24 @@
   background: #5a6fd6;
 }
 
+.board-card-leave {
+  padding: 8px 16px;
+  background: transparent;
+  color: #666;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.board-card-leave:hover {
+  background: #f5f5f5;
+  border-color: #999;
+  color: #333;
+}
+
 .board-card-delete {
   padding: 8px 16px;
   background: transparent;
