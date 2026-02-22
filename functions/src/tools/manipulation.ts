@@ -1,9 +1,15 @@
 import * as admin from "firebase-admin";
 import {assertObjectExists, assertObjectType, objectsRef} from "./helpers.js";
 import {getBoardState} from "./boardState.js";
+import {STICKY_COLOR_HEX} from "./types.js";
 
 function getDb(): admin.firestore.Firestore {
   return admin.firestore();
+}
+
+/** Normalize color: sticky names (yellow, pink, ...) to hex; hex passthrough. */
+function normalizeColor(color: string): string {
+  return STICKY_COLOR_HEX[color] ?? color;
 }
 
 /**
@@ -276,20 +282,65 @@ export async function updateText(
 }
 
 /**
- * Change color of an object. Returns objectId and color per spec.
+ * Change color of an object. Works for stickies, shapes, frames, and text.
+ * Sticky color names (yellow, pink, etc.) are converted to hex; shapes and frames use hex.
+ * For frames, updates both color and strokeColor so the border reflects the new color.
  */
 export async function changeColor(
   boardId: string,
   userId: string,
   input: { objectId: string; color: string }
 ): Promise<{ objectId: string; color: string }> {
-  await assertObjectExists(boardId, input.objectId);
-  await objectsRef(boardId).doc(input.objectId).update({
-    color: input.color,
+  const snap = await assertObjectExists(boardId, input.objectId);
+  const color = normalizeColor(input.color);
+  const data = snap.data() as { type?: string };
+  const updates: Record<string, unknown> = {
+    color,
     updatedAt: Date.now(),
     updatedBy: userId,
-  });
-  return {objectId: input.objectId, color: input.color};
+  };
+  if (data.type === "frame") {
+    updates.strokeColor = color;
+  }
+  await objectsRef(boardId).doc(input.objectId).update(updates);
+  return {objectId: input.objectId, color};
+}
+
+const COLOR_BATCH_SIZE = 450;
+
+/**
+ * Change color of many objects at once (e.g. "recolor all stickies", "make all frames blue").
+ * Works for all object types including frames. For frames, updates both color and strokeColor.
+ * Chunks into batches of 450 for Firestore.
+ */
+export async function changeMultipleColors(
+  boardId: string,
+  userId: string,
+  input: { changes: Array<{ objectId: string; color: string }> }
+): Promise<{ changed: number }> {
+  const now = Date.now();
+  for (let i = 0; i < input.changes.length; i += COLOR_BATCH_SIZE) {
+    const chunk = input.changes.slice(i, i + COLOR_BATCH_SIZE);
+    const refs = chunk.map(({objectId}) => objectsRef(boardId).doc(objectId));
+    const snaps = await getDb().getAll(...refs);
+    const batch = getDb().batch();
+    for (let j = 0; j < chunk.length; j++) {
+      const {color} = chunk[j];
+      const normalized = normalizeColor(color);
+      const data = snaps[j].exists ? (snaps[j].data() as { type?: string }) : undefined;
+      const updates: Record<string, unknown> = {
+        color: normalized,
+        updatedAt: now,
+        updatedBy: userId,
+      };
+      if (data?.type === "frame") {
+        updates.strokeColor = normalized;
+      }
+      batch.update(refs[j], updates);
+    }
+    await batch.commit();
+  }
+  return {changed: input.changes.length};
 }
 
 /**
