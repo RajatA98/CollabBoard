@@ -295,6 +295,7 @@ export function Canvas({
   }, [objects]);
   /** When dragging multi-select via marquee rect: rect start position. */
   const multiSelectDragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const dragEndHandledRef = useRef(false);
 
   // Selected line (only when single selection of a line)
   const selectedLine = selectedObjectIds.length === 1
@@ -515,6 +516,7 @@ export function Canvas({
     (draggedId: string) => {
       setIsDraggingNode(true);
       setHoveredShapeId(null);
+      dragEndHandledRef.current = false;
 
       // Determine which objects should move together.
       // For frames: always include children so they move in sync even if the frame wasn't pre-selected.
@@ -572,6 +574,7 @@ export function Canvas({
 
   const handleObjectDragEnd = useCallback(
     (draggedId: string, finalX: number, finalY: number) => {
+      dragEndHandledRef.current = true;
       const positions = dragStartPositionsRef.current;
       // Use positions ref as source of truth for dragged IDs (handles click-drag on unselected frames)
       const draggedIds = positions && positions.size > 1 ? Array.from(positions.keys()) : [draggedId];
@@ -681,6 +684,7 @@ export function Canvas({
     (e: Konva.KonvaEventObject<DragEvent>) => {
       const rect = e.target;
       multiSelectDragStartRef.current = { x: rect.x(), y: rect.y() };
+      dragEndHandledRef.current = false;
       onDragStart?.(selectedObjectIds);
       const stage = stageRef.current;
       if (!stage || selectedObjectIds.length <= 1) return;
@@ -729,6 +733,7 @@ export function Canvas({
       multiSelectDragStartRef.current = null;
       setIsDraggingNode(false);
       if (!start || !positions || selectedObjectIds.length <= 1) {
+        dragEndHandledRef.current = true;
         onDragEnd?.(selectedObjectIds);
         return;
       }
@@ -736,8 +741,8 @@ export function Canvas({
       const dy = rect.y() - start.y;
       const firstId = selectedObjectIds[0];
       const pos = positions.get(firstId);
-      if (!pos) { onDragEnd?.(selectedObjectIds); return; }
-      // handleObjectDragEnd already calls onDragEnd, so no need to call it here
+      if (!pos) { dragEndHandledRef.current = true; onDragEnd?.(selectedObjectIds); return; }
+      // handleObjectDragEnd already calls onDragEnd and sets dragEndHandledRef
       handleObjectDragEnd(firstId, pos.x + dx, pos.y + dy);
     },
     [selectedObjectIds, handleObjectDragEnd, onDragEnd]
@@ -921,13 +926,15 @@ export function Canvas({
     onClearTransform?.();
     setDropTargetFrameId(null);
     setIsDraggingNode(false);
-    // Clean up positions ref and unmark dragging for frame children that were
-    // dragged via the non-selected code path (where handleObjectDragEnd isn't called).
-    const positions = dragStartPositionsRef.current;
-    if (positions && positions.size > 1) {
-      onDragEnd?.(Array.from(positions.keys()));
-      dragStartPositionsRef.current = null;
+    // Only call onDragEnd if handleObjectDragEnd didn't already handle it.
+    // This prevents double-calling unmarkDragging which leaves stale IDs.
+    if (!dragEndHandledRef.current) {
+      const positions = dragStartPositionsRef.current;
+      if (positions && positions.size > 1) {
+        onDragEnd?.(Array.from(positions.keys()));
+      }
     }
+    dragStartPositionsRef.current = null;
   }, [onClearTransform, onDragEnd]);
 
   // ── Connected-line helpers ──────────────────────────────────────────────

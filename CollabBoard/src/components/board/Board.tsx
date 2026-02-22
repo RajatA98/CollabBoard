@@ -739,6 +739,8 @@ export function Board() {
 
       // When a frame is moved/resized in a multi-select, proportionally transform all children
       const resolvedChanges = [...changes];
+      // Track children that were moved BY a frame — skip containment re-check for these
+      const movedByFrame = new Set<string>();
 
       for (const { id, updates: ups } of changes) {
         const obj = objects.find((o) => o.id === id);
@@ -762,6 +764,7 @@ export function Board() {
 
         const children = getShapesInFrame(id);
         for (const child of children) {
+          movedByFrame.add(child.id);
           const relX = child.x - oldX;
           const relY = child.y - oldY;
           const childUpdates: Partial<BoardObject> = {
@@ -791,8 +794,9 @@ export function Board() {
         pushAction({ type: 'update', changes: undoChanges });
       }
       batchUpdateObjects(resolvedChanges.map(({ id, updates: ups }) => ({ objectId: id, updates: ups })));
-      // Frame containment for each moved object
+      // Frame containment for each moved object — skip children that were moved BY their parent frame
       resolvedChanges.forEach(({ id, updates: ups }) => {
+        if (movedByFrame.has(id)) return;
         const obj = objects.find((o) => o.id === id);
         if (!obj || obj.type === 'frame') return;
         if (ups.x === undefined && ups.y === undefined && ups.width === undefined && ups.height === undefined) return;
