@@ -23,7 +23,7 @@ const FRAME_BORDER_COLOR_SELECTED = '#5588ff';
 const FRAME_BORDER_COLOR_DROP_TARGET = '#22cc66';
 const FRAME_BG_COLOR = 'rgba(51, 102, 255, 0.05)';
 const FRAME_BG_COLOR_DROP_TARGET = 'rgba(34, 204, 102, 0.08)';
-const TITLE_BG_COLOR = '#3366ff';
+const TITLE_BG_COLOR_DEFAULT = '#3366ff';
 const TITLE_HEIGHT = 22;
 const TITLE_PADDING = 8;
 const TITLE_FONT_SIZE = 13;
@@ -55,9 +55,9 @@ export function Frame({ object, isSelected, isDropTarget, onSelect, onUpdate, on
   };
 
   const title = object.text || 'Frame';
-  const borderColor = isDropTarget
-    ? FRAME_BORDER_COLOR_DROP_TARGET
-    : object.strokeColor ?? (isSelected ? FRAME_BORDER_COLOR_SELECTED : FRAME_BORDER_COLOR);
+  const frameColor = object.strokeColor ?? object.color ?? (isSelected ? FRAME_BORDER_COLOR_SELECTED : FRAME_BORDER_COLOR);
+  const borderColor = isDropTarget ? FRAME_BORDER_COLOR_DROP_TARGET : frameColor;
+  const titleBgColor = object.strokeColor ?? object.color ?? TITLE_BG_COLOR_DEFAULT;
   const borderWidth = isDropTarget ? 3 : (object.strokeWidth ?? 2);
   const bgColor = isDropTarget ? FRAME_BG_COLOR_DROP_TARGET : FRAME_BG_COLOR;
 
@@ -101,7 +101,7 @@ export function Frame({ object, isSelected, isDropTarget, onSelect, onUpdate, on
         y={-TITLE_HEIGHT}
         width={Math.min(titleWidth, object.width)}
         height={TITLE_HEIGHT}
-        fill={TITLE_BG_COLOR}
+        fill={titleBgColor}
         cornerRadius={[4, 4, 0, 0]}
       />
       {/* Title text */}

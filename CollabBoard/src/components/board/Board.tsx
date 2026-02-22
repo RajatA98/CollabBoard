@@ -368,6 +368,7 @@ export function Board() {
         rotation: 0,
         text: `Frame ${existingFrameCount + 1}`,
         color: '#3366ff',
+        zIndex: 0,
         createdBy: user.uid,
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -727,11 +728,21 @@ export function Board() {
           if (!stillFullyInside) {
             pushAction({ type: 'update', changes: [{ id, before: { frameId: obj.frameId }, after: { frameId: undefined } }] });
             updateObject(id, { frameId: undefined });
+            const detachedFromFrameId = obj.frameId;
+            setSelectedObjectIds((prev) => {
+              if (!prev.includes(id) || !prev.includes(detachedFromFrameId)) return prev;
+              return prev.filter((oid) => {
+                if (oid === id) return true;
+                if (oid === detachedFromFrameId) return false;
+                const selectedObj = objects.find((o) => o.id === oid);
+                return selectedObj?.frameId !== detachedFromFrameId;
+              });
+            });
           }
         }
       }
     },
-    [objects, updateObject, batchUpdateObjects, pushAction, getShapesInFrame, getFrameContainingRect]
+    [objects, updateObject, batchUpdateObjects, pushAction, getShapesInFrame, getFrameContainingRect, setSelectedObjectIds]
   );
 
   const handleBatchObjectUpdate = useCallback(
@@ -1158,6 +1169,7 @@ export function Board() {
           rotation: 0,
           text: `Frame ${existingFrameCount + 1}`,
           color: '#3366ff',
+          zIndex: 0,
           createdBy: user.uid,
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -1454,6 +1466,7 @@ export function Board() {
           <PresenceBar onlineUsers={onlineUsers} />
           <div
             ref={canvasContainerRef}
+            data-testid="canvas-area"
             className={`canvas-area${isDraggingShapeFromSidebar ? ' dragging-shape' : ''}`}
             style={{ position: 'relative' }}
             onDragOver={handleCanvasDragOver}
