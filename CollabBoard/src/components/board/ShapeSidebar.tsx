@@ -10,9 +10,14 @@ interface ShapeSidebarProps {
   shapesPanelOpen?: boolean;
   onShapesPanelOpenChange?: (open: boolean) => void;
   /** Current canvas interaction mode */
-  canvasMode?: 'cursor' | 'grab';
+  canvasMode?: 'cursor' | 'grab' | 'pen' | 'eraser';
   /** Called when the user clicks a mode button */
-  onCanvasModeChange?: (mode: 'cursor' | 'grab') => void;
+  onCanvasModeChange?: (mode: 'cursor' | 'grab' | 'pen' | 'eraser') => void;
+  /** Pen tool settings */
+  penColor?: string;
+  onPenColorChange?: (color: string) => void;
+  penStrokeWidth?: number;
+  onPenStrokeWidthChange?: (width: number) => void;
 }
 
 /** Icon-only sticky note (folded corner) for left bar */
@@ -119,6 +124,36 @@ const HandIcon = () => (
   </svg>
 );
 
+/** Pen icon for drawing mode */
+const PenIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M17 3a2.83 2.83 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+  </svg>
+);
+
+/** Eraser icon */
+const EraserIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M20 20H7L3 16c-.8-.8-.8-2 0-2.8L14.8 1.4c.8-.8 2-.8 2.8 0l5 5c.8.8.8 2 0 2.8L12 20" />
+    <path d="M6 11l7 7" />
+  </svg>
+);
+
+const PEN_PRESET_COLORS = [
+  { id: 'black', value: '#000000' },
+  { id: 'red', value: '#E53935' },
+  { id: 'blue', value: '#1E88E5' },
+  { id: 'green', value: '#43A047' },
+  { id: 'orange', value: '#FB8C00' },
+  { id: 'purple', value: '#8E24AA' },
+];
+
+const PEN_STROKE_WIDTHS = [
+  { label: 'Thin', value: 2 },
+  { label: 'Medium', value: 5 },
+  { label: 'Thick', value: 10 },
+];
+
 interface TooltipButtonProps {
   label: string;
   shortcut?: string;
@@ -193,6 +228,10 @@ export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({
   onShapesPanelOpenChange,
   canvasMode = 'cursor',
   onCanvasModeChange,
+  penColor = '#000000',
+  onPenColorChange,
+  penStrokeWidth = 5,
+  onPenStrokeWidthChange,
 }) => {
   const didDragRef = useRef(false);
   const [shapesPanelOpenInternal, setShapesPanelOpenInternal] = useState(false);
@@ -232,6 +271,8 @@ export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({
     setShapesPanelOpen(!shapesPanelOpen);
   };
 
+  const isCustomColor = !PEN_PRESET_COLORS.some(c => c.value === penColor);
+
   return (
     <div className="shape-sidebar" data-testid="shape-sidebar" role="group" aria-label="Shape tools">
       <div className="shape-sidebar-tools">
@@ -246,7 +287,32 @@ export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({
           active={canvasMode === 'cursor'}
         />
 
-        {/* Divider between mode tools and shape tools */}
+        {/* Divider between mode tools and drawing tools */}
+        <div className="shape-sidebar-divider" />
+
+        {/* Pen tool */}
+        <TooltipButton
+          label="Pen"
+          shortcut="P"
+          icon={<PenIcon />}
+          onClick={() => onCanvasModeChange?.(canvasMode === 'pen' ? 'cursor' : 'pen')}
+          data-testid="tool-pen"
+          aria-label="Pen"
+          active={canvasMode === 'pen'}
+        />
+
+        {/* Eraser tool */}
+        <TooltipButton
+          label="Eraser"
+          shortcut="E"
+          icon={<EraserIcon />}
+          onClick={() => onCanvasModeChange?.(canvasMode === 'eraser' ? 'cursor' : 'eraser')}
+          data-testid="tool-eraser"
+          aria-label="Eraser"
+          active={canvasMode === 'eraser'}
+        />
+
+        {/* Divider between drawing tools and shape tools */}
         <div className="shape-sidebar-divider" />
 
         {/* Sticky note */}
@@ -301,6 +367,57 @@ export const ShapeSidebar: React.FC<ShapeSidebarProps> = ({
           active={shapesPanelOpen}
         />
       </div>
+
+      {/* Pen settings panel – to the right (only when pen tool is active) */}
+      {canvasMode === 'pen' && (
+        <div className="pen-settings-panel" data-testid="pen-settings-panel" role="region" aria-label="Pen settings">
+          <div className="pen-settings-section">
+            <div className="pen-settings-label">Color</div>
+            <div className="pen-color-swatches">
+              {PEN_PRESET_COLORS.map(c => (
+                <button
+                  key={c.id}
+                  type="button"
+                  className={`pen-color-swatch ${penColor === c.value ? 'pen-color-swatch-active' : ''}`}
+                  style={{ backgroundColor: c.value }}
+                  onClick={() => onPenColorChange?.(c.value)}
+                  aria-label={c.id}
+                  data-testid={`pen-color-${c.id}`}
+                />
+              ))}
+              <label className={`pen-color-custom ${isCustomColor ? 'pen-color-custom-active' : ''}`} aria-label="Custom color">
+                <input
+                  type="color"
+                  value={penColor}
+                  onChange={(e) => onPenColorChange?.(e.target.value)}
+                  className="pen-color-input"
+                  data-testid="pen-color-custom"
+                />
+                <span className="pen-color-custom-icon" style={isCustomColor ? { backgroundColor: penColor } : undefined}>+</span>
+              </label>
+            </div>
+          </div>
+          <div className="pen-settings-section">
+            <div className="pen-settings-label">Size</div>
+            <div className="pen-width-options">
+              {PEN_STROKE_WIDTHS.map(w => (
+                <button
+                  key={w.value}
+                  type="button"
+                  className={`pen-width-btn ${penStrokeWidth === w.value ? 'pen-width-btn-active' : ''}`}
+                  onClick={() => onPenStrokeWidthChange?.(w.value)}
+                  aria-label={w.label}
+                  data-testid={`pen-width-${w.value}`}
+                >
+                  <svg width="28" height="16" viewBox="0 0 28 16">
+                    <line x1="4" y1="8" x2="24" y2="8" stroke="currentColor" strokeWidth={w.value} strokeLinecap="round" />
+                  </svg>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Shapes panel – to the right */}
       {shapesPanelOpen && (

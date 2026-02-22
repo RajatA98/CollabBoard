@@ -14,6 +14,8 @@ import {
   createTextBox,
   createTextBoxes as toolsCreateTextBoxes,
   createConnector,
+  createPenStroke as toolsCreatePenStroke,
+  createPenStrokes as toolsCreatePenStrokes,
   moveObject as toolsMoveObject,
   moveMultipleObjects as toolsMoveMultipleObjects,
   resizeObject as toolsResizeObject,
@@ -234,4 +236,32 @@ export async function clearBoard(
   userId?: string
 ) {
   return toolsClearBoard(boardId, userId ?? "ai", input);
+}
+
+const PEN_STROKE_BULK_MAX = 20;
+
+type PenStrokeSpec = {
+  points: Array<{x: number; y: number}>;
+  color: string;
+  strokeWidth?: number;
+  zIndex?: number;
+};
+
+export async function createPenStroke(
+  boardId: string,
+  userId: string | undefined,
+  input: PenStrokeSpec
+) {
+  return toolsCreatePenStroke(boardId, userId ?? "ai", input);
+}
+
+export async function createPenStrokes(
+  boardId: string,
+  userId: string | undefined,
+  input: {strokes: PenStrokeSpec[]}
+) {
+  if ((input.strokes?.length ?? 0) > PEN_STROKE_BULK_MAX) {
+    throw new Error(`createPenStrokes: max ${PEN_STROKE_BULK_MAX} strokes per call; split into batches.`);
+  }
+  return toolsCreatePenStrokes(boardId, userId ?? "ai", input);
 }

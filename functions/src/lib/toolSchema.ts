@@ -544,6 +544,78 @@ export const boardTools: Anthropic.Tool[] = [
     },
   },
   {
+    name: "createPenStroke",
+    description:
+      "Draw a freehand pen stroke on the board using an ordered list of absolute (x, y) points. Use for organic curves, hand-drawn arrows, underlines, scribbles, and any path that can't be expressed cleanly as a straight line/arrow. The stroke is rendered above all shapes, frames, and sticky notes. For simple straight connectors between objects prefer createConnector. For complex pictorial drawings (e.g. a cat face made of curves) use multiple createPenStroke calls. Use createPenStrokes to draw several strokes in one call.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        points: {
+          type: "array" as const,
+          description:
+            "Ordered list of absolute board-coordinate points that define the stroke path. Each item must have x and y. Use enough points (10-50+) to produce a smooth curve — more points = smoother line.",
+          items: {
+            type: "object" as const,
+            properties: {
+              x: {type: "number" as const, description: "Absolute X on the board"},
+              y: {type: "number" as const, description: "Absolute Y on the board"},
+            },
+            required: ["x", "y"],
+          },
+        },
+        color: {
+          type: "string" as const,
+          description: "Stroke color as hex (e.g. #000000 for black, #FF0000 for red)",
+        },
+        strokeWidth: {
+          type: "number" as const,
+          description: "Width of the stroke in pixels. Default 4. Use 2 for thin detail lines, 8+ for bold strokes.",
+        },
+        zIndex: {
+          type: "number" as const,
+          description: "Stacking order among pen strokes. Higher = on top. Defaults to 0.",
+        },
+      },
+      required: ["points", "color"],
+    },
+  },
+  {
+    name: "createPenStrokes",
+    description:
+      "Draw multiple freehand pen strokes in one call. Use when a drawing requires several separate paths (e.g. two eyes, a smile, and eyebrows for a face). Pass an array of stroke specs; each item has points, color (optional strokeWidth, zIndex). Max 20 strokes per call.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        strokes: {
+          type: "array" as const,
+          description: "List of pen stroke specs",
+          items: {
+            type: "object" as const,
+            properties: {
+              points: {
+                type: "array" as const,
+                description: "Ordered absolute board-coordinate points",
+                items: {
+                  type: "object" as const,
+                  properties: {
+                    x: {type: "number" as const},
+                    y: {type: "number" as const},
+                  },
+                  required: ["x", "y"],
+                },
+              },
+              color: {type: "string" as const, description: "Stroke color as hex"},
+              strokeWidth: {type: "number" as const, description: "Stroke width in pixels. Default 4."},
+              zIndex: {type: "number" as const, description: "Stacking order. Default 0."},
+            },
+            required: ["points", "color"],
+          },
+        },
+      },
+      required: ["strokes"],
+    },
+  },
+  {
     name: "getBoardState",
     description:
       "Returns EVERY object currently on the board with no limit: objects (array with id, type, x, y, etc.), total count, byType counts, and a summary string. For 'recolor all stickies', 'make all frames blue', or 'change color of all X': call getBoardState FIRST, filter by type (e.g. type==='sticky' or type==='frame'), then call changeMultipleColors with a changes array of { objectId, color }. For changing text on many stickies use getBoardState then updateText per object as needed. Never act only on objects you just created—use getBoardState to include everything on the board.",

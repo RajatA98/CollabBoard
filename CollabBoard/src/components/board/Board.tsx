@@ -67,7 +67,9 @@ export function Board() {
   } | null>(null);
   const [shapesPanelOpen, setShapesPanelOpen] = useState(false);
   const [isDraggingShapeFromSidebar, setIsDraggingShapeFromSidebar] = useState(false);
-  const [canvasMode, setCanvasMode] = useState<'cursor' | 'grab'>('cursor');
+  const [canvasMode, setCanvasMode] = useState<'cursor' | 'grab' | 'pen' | 'eraser'>('cursor');
+  const [penColor, setPenColor] = useState('#000000');
+  const [penStrokeWidth, setPenStrokeWidth] = useState(5);
   const [boardMeta, setBoardMeta] = useState<BoardMeta | null>(null);
   const [deleteFrameConfirm, setDeleteFrameConfirm] = useState<{
     selectedIds: string[];
@@ -440,6 +442,29 @@ export function Board() {
         console.error(`❌ Failed to add ${type} to Firestore:`, err);
       });
   }, [addObject, user, viewport, pushAction, objects, updateObject]);
+
+  const handleAddPenStroke = useCallback((stroke: BoardObject) => {
+    if (!user) return;
+    const withUser = { ...stroke, createdBy: user.uid, updatedBy: user.uid };
+    addObject(withUser)
+      .then(() => {
+        pushAction({ type: 'add', objects: [withUser] });
+      })
+      .catch((err) => {
+        console.error('Failed to add pen stroke:', err);
+      });
+  }, [addObject, user, pushAction]);
+
+  const handleReplaceStrokes = useCallback((deletions: string[], additions: BoardObject[]) => {
+    if (!user) return;
+    deletions.forEach((id) => deleteObject(id));
+    additions.forEach((stroke) => {
+      const withUser = { ...stroke, updatedBy: user.uid };
+      addObject(withUser).catch((err) => {
+        console.error('Failed to add erased sub-stroke:', err);
+      });
+    });
+  }, [addObject, deleteObject, user]);
 
   const handleCanvasClick = useCallback(() => {
     setContextMenu(null);
@@ -1297,6 +1322,20 @@ export function Board() {
         setCanvasMode('grab');
         return;
       }
+      if (e.key === 'p' && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+        setCanvasMode('pen');
+        return;
+      }
+      if (e.key === 'e' && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+        setCanvasMode('eraser');
+        return;
+      }
+      if (e.key === 'Escape') {
+        if (canvasMode === 'pen' || canvasMode === 'eraser') {
+          setCanvasMode('cursor');
+          return;
+        }
+      }
       // T = Text, N = Note (sticky) — create at center
       if (e.key === 't' && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
         e.preventDefault();
@@ -1385,6 +1424,7 @@ export function Board() {
     undo,
     redo,
     createObjectAtCenter,
+    canvasMode,
   ]);
 
   const handleLogout = useCallback(async () => {
@@ -1422,6 +1462,10 @@ export function Board() {
           onShapesPanelOpenChange={setShapesPanelOpen}
           canvasMode={canvasMode}
           onCanvasModeChange={setCanvasMode}
+          penColor={penColor}
+          onPenColorChange={setPenColor}
+          penStrokeWidth={penStrokeWidth}
+          onPenStrokeWidthChange={setPenStrokeWidth}
         />
         <div className="board-main">
           <UndoRedoClearPanel
@@ -1507,6 +1551,10 @@ export function Board() {
               onDragStart={markDragging}
               onDragEnd={unmarkDragging}
               canvasMode={canvasMode}
+              penColor={penColor}
+              penStrokeWidth={penStrokeWidth}
+              onAddPenStroke={handleAddPenStroke}
+              onReplaceStrokes={handleReplaceStrokes}
               isDraggingShapeFromSidebar={isDraggingShapeFromSidebar}
             />
         {selectedObject && (

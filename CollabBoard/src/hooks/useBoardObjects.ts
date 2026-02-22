@@ -10,7 +10,7 @@ import {
 } from '../firebase/firestore';
 import type { BoardObject } from '../types';
 
-const BOARD_OBJECT_TYPES: BoardObject['type'][] = ['sticky', 'rectangle', 'circle', 'line', 'text', 'triangle', 'star', 'frame'];
+const BOARD_OBJECT_TYPES: BoardObject['type'][] = ['sticky', 'rectangle', 'circle', 'line', 'text', 'triangle', 'star', 'frame', 'pen'];
 
 const MIN_SIZE = 20;
 const MAX_ROTATION = 360;
@@ -46,6 +46,8 @@ function sanitizeUpdates(updates: Partial<BoardObject>, existing?: BoardObject):
         x: num(w.x, 0),
         y: num(w.y, 0),
       }));
+    } else if (key === 'points' && Array.isArray(value)) {
+      (out as Record<string, unknown>)[key] = value.filter((v: unknown) => typeof v === 'number' && Number.isFinite(v));
     } else {
       (out as Record<string, unknown>)[key] = value;
     }
@@ -93,6 +95,7 @@ function normalizeBoardObject(raw: Record<string, unknown>, id: string): BoardOb
       : undefined,
     frameId: raw.frameId != null ? str(raw.frameId, '') : undefined,
     aspectRatio: raw.aspectRatio != null ? num(raw.aspectRatio, 1) : undefined,
+    points: Array.isArray(raw.points) ? (raw.points as number[]).filter(v => typeof v === 'number' && Number.isFinite(v)) : undefined,
     zIndex: num(raw.zIndex, 0),
   };
 }
