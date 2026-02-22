@@ -30,6 +30,8 @@ function sanitizePayload(updates: Partial<BoardObject>): Record<string, unknown>
         x: Number.isFinite(w.x) ? w.x : 0,
         y: Number.isFinite(w.y) ? w.y : 0,
       }));
+    } else if (key === 'points' && Array.isArray(value)) {
+      payload[key] = (value as number[]).filter((v) => Number.isFinite(v));
     } else {
       payload[key] = value;
     }

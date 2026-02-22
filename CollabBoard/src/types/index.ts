@@ -5,7 +5,7 @@ export interface Waypoint {
 
 export interface BoardObject {
   id: string;
-  type: 'sticky' | 'rectangle' | 'circle' | 'line' | 'text' | 'triangle' | 'star' | 'frame';
+  type: 'sticky' | 'rectangle' | 'circle' | 'line' | 'text' | 'triangle' | 'star' | 'frame' | 'pen';
   x: number;
   y: number;
   width: number;
@@ -39,6 +39,8 @@ export interface BoardObject {
   frameId?: string;
   // Original width/height ratio for aspect-ratio preservation on resize
   aspectRatio?: number;
+  // Pen stroke points: flattened [x1, y1, x2, y2, ...] relative to object origin
+  points?: number[];
   // Stacking order: higher values render on top
   zIndex?: number;
 }

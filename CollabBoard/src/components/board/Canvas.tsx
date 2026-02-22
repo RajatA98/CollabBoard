@@ -11,6 +11,7 @@ import { LineShape, buildLinePointObjects } from './LineShape';
 import { ConnectionPoints } from './ConnectionPoints';
 import { TextElement } from './TextElement';
 import { Frame } from './Frame';
+import { PenStroke } from './PenStroke';
 import { RemoteCursor } from './RemoteCursor';
 import { SelectionRect } from './SelectionRect';
 import { rectsIntersect } from '../../utils/coordinates';
@@ -70,8 +71,13 @@ interface CanvasProps {
   remoteEditings?: Record<string, LiveEditingData>;
   onBroadcastTransform?: (objectId: string, x: number, y: number, width: number, height: number, rotation: number) => void;
   onClearTransform?: () => void;
-  /** Current canvas interaction mode: 'cursor' for select/marquee, 'grab' for pan */
-  canvasMode?: 'cursor' | 'grab';
+  /** Current canvas interaction mode */
+  canvasMode?: 'cursor' | 'grab' | 'pen' | 'eraser';
+  /** Pen tool settings */
+  penColor?: string;
+  penStrokeWidth?: number;
+  /** Called when a pen stroke is completed */
+  onAddPenStroke?: (stroke: BoardObject) => void;
   /** When true, stage panning is disabled so HTML5 drop from sidebar is not stolen. */
   isDraggingShapeFromSidebar?: boolean;
   /** Notify parent which object IDs just started dragging (so Firestore snapshots don't reset their positions). */
@@ -238,6 +244,9 @@ export function Canvas({
   onBroadcastTransform,
   onClearTransform,
   canvasMode = 'cursor',
+  penColor = '#000000',
+  penStrokeWidth: penStrokeWidthProp = 5,
+  onAddPenStroke,
   isDraggingShapeFromSidebar = false,
   onDragStart,
   onDragEnd,
@@ -289,6 +298,18 @@ export function Canvas({
   const drawingSnapRef = useRef<SnapCandidate | null>(null);
 
   const [isDraggingNode, setIsDraggingNode] = useState(false);
+
+  // ── Pen drawing state ──────────────────────────────────────────────────
+  const isDrawingPenRef = useRef(false);
+  const drawingOriginRef = useRef<{ x: number; y: number } | null>(null);
+  const currentPointsRef = useRef<number[]>([]);
+  const [drawingPoints, setDrawingPoints] = useState<number[] | null>(null);
+  const [drawingOriginState, setDrawingOriginState] = useState<{ x: number; y: number } | null>(null);
+
+  // ── Eraser state ──────────────────────────────────────────────────────
+  const isErasingRef = useRef(false);
+  const erasedIdsRef = useRef<Set<string>>(new Set());
+  const [eraserPos, setEraserPos] = useState<{ x: number; y: number } | null>(null);
 
   /** When multi-select: current visual position/size/rotation of each selected node (for ConnectionPoints and line overrides). */
   const multiSelectDisplayRef = useRef<Map<string, { x: number; y: number; width: number; height: number; rotation: number }>>(new Map());
@@ -423,6 +444,48 @@ export function Canvas({
         };
         return;
       }
+      // Pen mode: start drawing a freehand stroke
+      if (canvasMode === 'pen' && e.evt.button === 0) {
+        e.evt.preventDefault();
+        const worldPos = getWorldPointer();
+        if (!worldPos) return;
+        isDrawingPenRef.current = true;
+        drawingOriginRef.current = worldPos;
+        currentPointsRef.current = [0, 0];
+        setDrawingOriginState(worldPos);
+        setDrawingPoints([0, 0]);
+        return;
+      }
+      // Eraser mode: start erasing pen strokes
+      if (canvasMode === 'eraser' && e.evt.button === 0) {
+        e.evt.preventDefault();
+        isErasingRef.current = true;
+        erasedIdsRef.current = new Set();
+        // Try to erase object at pointer position
+        const stage = e.target.getStage();
+        if (stage) {
+          const pointer = stage.getPointerPosition();
+          if (pointer) {
+            const target = stage.getIntersection(pointer);
+            if (target) {
+              let node: Konva.Node | null = target;
+              while (node && node !== stage) {
+                const nid = node.id?.() ?? '';
+                if (nid) {
+                  const found = objectsRef.current.find(o => o.id === nid && o.type === 'pen');
+                  if (found && !erasedIdsRef.current.has(found.id)) {
+                    erasedIdsRef.current.add(found.id);
+                    _onObjectDelete?.(found.id);
+                  }
+                  break;
+                }
+                node = node.parent;
+              }
+            }
+          }
+        }
+        return;
+      }
       const stage = e.target.getStage();
       const target = e.target;
       const isStage = target === stage;
@@ -438,7 +501,7 @@ export function Canvas({
       setMarqueeStart(worldPos);
       setMarqueeEnd(worldPos);
     },
-    [getWorldPointer, viewport, canvasMode]
+    [getWorldPointer, viewport, canvasMode, _onObjectDelete]
   );
 
   const handleStageMouseMove = useCallback(
@@ -446,6 +509,49 @@ export function Canvas({
       if (onMouseMove) {
         const worldPos = getWorldPointer();
         if (worldPos) onMouseMove(worldPos.x, worldPos.y);
+      }
+      // Update eraser cursor position
+      if (canvasMode === 'eraser') {
+        const worldPos = getWorldPointer();
+        if (worldPos) setEraserPos(worldPos);
+      }
+      // Pen drawing: accumulate points
+      if (isDrawingPenRef.current && canvasMode === 'pen') {
+        const worldPos = getWorldPointer();
+        const origin = drawingOriginRef.current;
+        if (worldPos && origin) {
+          const relX = worldPos.x - origin.x;
+          const relY = worldPos.y - origin.y;
+          currentPointsRef.current.push(relX, relY);
+          setDrawingPoints([...currentPointsRef.current]);
+        }
+        return;
+      }
+      // Eraser drag: erase pen strokes under cursor
+      if (isErasingRef.current && canvasMode === 'eraser') {
+        const stage = stageRef.current;
+        if (stage) {
+          const pointer = stage.getPointerPosition();
+          if (pointer) {
+            const target = stage.getIntersection(pointer);
+            if (target) {
+              let node: Konva.Node | null = target;
+              while (node && node !== stage) {
+                const nid = node.id?.() ?? '';
+                if (nid) {
+                  const found = objectsRef.current.find(o => o.id === nid && o.type === 'pen');
+                  if (found && !erasedIdsRef.current.has(found.id)) {
+                    erasedIdsRef.current.add(found.id);
+                    _onObjectDelete?.(found.id);
+                  }
+                  break;
+                }
+                node = node.parent;
+              }
+            }
+          }
+        }
+        return;
       }
       if (isMarqueeSelecting) {
         const worldPos = getWorldPointer();
@@ -494,7 +600,7 @@ export function Canvas({
         }
       }
     },
-    [onMouseMove, getWorldPointer, isMarqueeSelecting, objects, drawingConnection]
+    [onMouseMove, getWorldPointer, isMarqueeSelecting, objects, drawingConnection, canvasMode, _onObjectDelete]
   );
 
   const handleStageMouseUp = useCallback(
@@ -503,10 +609,16 @@ export function Canvas({
         setIsMiddleMouseDown(false);
         return;
       }
+      // Eraser release
+      if (canvasMode === 'eraser' && e.evt.button === 0) {
+        isErasingRef.current = false;
+        erasedIdsRef.current = new Set();
+        return;
+      }
       // Marquee finalization is handled by window mouseup so we get it even when releasing over a shape
       if (e.evt.button === 0 && isMarqueeSelecting) return;
     },
-    [isMarqueeSelecting]
+    [isMarqueeSelecting, canvasMode]
   );
 
   // Window mouseup ensures marquee selection finalizes even when releasing over a shape (Stage may not get the event)
@@ -553,6 +665,65 @@ export function Canvas({
     window.addEventListener('mouseup', onWindowMouseUp);
     return () => window.removeEventListener('mouseup', onWindowMouseUp);
   }, [isMarqueeSelecting, objects, onSetSelectedIds, onClearSelection, onCanvasClick]);
+
+  // Window mouseup handler for pen stroke finalization
+  useEffect(() => {
+    if (canvasMode !== 'pen') return;
+    const onWindowMouseUp = (e: MouseEvent) => {
+      if (e.button !== 0 || !isDrawingPenRef.current) return;
+      isDrawingPenRef.current = false;
+      const pts = currentPointsRef.current;
+      const origin = drawingOriginRef.current;
+      // Clean up drawing state
+      setDrawingPoints(null);
+      setDrawingOriginState(null);
+      currentPointsRef.current = [];
+      drawingOriginRef.current = null;
+      // Need at least 2 points (4 values) to form a stroke
+      if (pts.length < 4 || !origin) return;
+      // Compute bounding box for width/height
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (let i = 0; i < pts.length; i += 2) {
+        if (pts[i] < minX) minX = pts[i];
+        if (pts[i] > maxX) maxX = pts[i];
+        if (pts[i + 1] < minY) minY = pts[i + 1];
+        if (pts[i + 1] > maxY) maxY = pts[i + 1];
+      }
+      const w = Math.max(maxX - minX, 1);
+      const h = Math.max(maxY - minY, 1);
+      const stroke: BoardObject = {
+        id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+        type: 'pen',
+        x: origin.x,
+        y: origin.y,
+        width: w,
+        height: h,
+        rotation: 0,
+        color: penColor,
+        strokeWidth: penStrokeWidthProp,
+        points: pts,
+        createdBy: '',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        updatedBy: '',
+      };
+      onAddPenStroke?.(stroke);
+    };
+    window.addEventListener('mouseup', onWindowMouseUp);
+    return () => window.removeEventListener('mouseup', onWindowMouseUp);
+  }, [canvasMode, penColor, penStrokeWidthProp, onAddPenStroke]);
+
+  // Window mouseup handler for eraser release
+  useEffect(() => {
+    if (canvasMode !== 'eraser') return;
+    const onWindowMouseUp = (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      isErasingRef.current = false;
+      erasedIdsRef.current = new Set();
+    };
+    window.addEventListener('mouseup', onWindowMouseUp);
+    return () => window.removeEventListener('mouseup', onWindowMouseUp);
+  }, [canvasMode]);
 
   const handleObjectDragStart = useCallback(
     (draggedId: string) => {
@@ -798,7 +969,7 @@ export function Canvas({
 
   const handleStageClick = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
-      if (canvasMode === 'grab') return; // No selection interaction in grab mode
+      if (canvasMode === 'grab' || canvasMode === 'pen' || canvasMode === 'eraser') return; // No selection interaction in grab/pen/eraser mode
       const stage = e.target.getStage();
       const target = e.target;
       const isStage = target === stage;
@@ -1300,7 +1471,7 @@ export function Canvas({
   }, [objects, selectedObjectIds]);
 
   return (
-    <div style={{ width: '100%', height: '100%', pointerEvents: isDraggingShapeFromSidebar ? 'none' : 'auto', cursor: canvasMode === 'grab' ? (isGrabPanning ? 'grabbing' : 'grab') : undefined }}>
+    <div style={{ width: '100%', height: '100%', pointerEvents: isDraggingShapeFromSidebar ? 'none' : 'auto', cursor: canvasMode === 'grab' ? (isGrabPanning ? 'grabbing' : 'grab') : canvasMode === 'pen' ? 'crosshair' : canvasMode === 'eraser' ? 'none' : undefined }}>
     <Stage
       ref={stageRef}
       width={stageSize.width}
@@ -1371,6 +1542,8 @@ export function Canvas({
                 return <LineShape {...commonProps} object={displayObj} />;
               case 'frame':
                 return <Frame {...commonProps} />;
+              case 'pen':
+                return <PenStroke {...commonProps} />;
               default:
                 return <Rectangle {...commonProps} />;
             }
@@ -1431,6 +1604,8 @@ export function Canvas({
                       return <LineShape {...selectedCommon} object={displayObject} />;
                     case 'frame':
                       return <Frame {...selectedCommon} />;
+                    case 'pen':
+                      return <PenStroke {...selectedCommon} />;
                     default:
                       return <Rectangle {...selectedCommon} />;
                   }
@@ -1438,6 +1613,32 @@ export function Canvas({
               </React.Fragment>
               );
             })}
+        {/* In-progress pen stroke */}
+        {drawingPoints && drawingOriginState && (
+          <KonvaLine
+            x={drawingOriginState.x}
+            y={drawingOriginState.y}
+            points={drawingPoints}
+            stroke={penColor}
+            strokeWidth={penStrokeWidthProp}
+            lineCap="round"
+            lineJoin="round"
+            tension={0}
+            listening={false}
+          />
+        )}
+        {/* Eraser cursor visual */}
+        {canvasMode === 'eraser' && eraserPos && (
+          <KonvaCircle
+            x={eraserPos.x}
+            y={eraserPos.y}
+            radius={12}
+            fill="rgba(255,255,255,0.6)"
+            stroke="#888"
+            strokeWidth={1.5}
+            listening={false}
+          />
+        )}
         {/* Transformer is always rendered (never conditionally unmounted) to avoid Konva state issues when selection changes during blur/click transitions */}
         {(() => {
           const singleObj = selectedObjectIds.length === 1 ? objects.find((o) => o.id === selectedObjectIds[0]) : null;
