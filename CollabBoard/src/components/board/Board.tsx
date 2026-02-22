@@ -164,9 +164,16 @@ export function Board() {
           const childIds = objects.filter((o) => o.frameId === id).map((o) => o.id);
           newSelectedIds = [id, ...childIds];
         } else if (obj.frameId) {
-          const frameId = obj.frameId;
-          const childIds = objects.filter((o) => o.frameId === frameId).map((o) => o.id);
-          newSelectedIds = [frameId, ...childIds];
+          // Two-stage selection: if the parent frame is already selected (frame group is active),
+          // a second click on a child selects only that child for individual manipulation.
+          const frameAlreadySelected = selectedObjectIds.includes(obj.frameId);
+          if (frameAlreadySelected) {
+            newSelectedIds = [id];
+          } else {
+            const frameId = obj.frameId;
+            const childIds = objects.filter((o) => o.frameId === frameId).map((o) => o.id);
+            newSelectedIds = [frameId, ...childIds];
+          }
         } else {
           newSelectedIds = [id];
         }
@@ -361,6 +368,7 @@ export function Board() {
         rotation: 0,
         text: `Frame ${existingFrameCount + 1}`,
         color: '#3366ff',
+        zIndex: 0,
         createdBy: user.uid,
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -395,6 +403,7 @@ export function Board() {
         setSelectedObjectIds([id]);
         pushAction({ type: 'add', objects: [newObject] });
         if (type === 'frame') {
+          // Auto-assign existing shapes that are fully inside the new frame
           const fx = newObject.x;
           const fy = newObject.y;
           const fRight = newObject.x + newObject.width;
@@ -402,6 +411,7 @@ export function Board() {
           const contained = objects.filter(
             (o) =>
               o.id !== newObject.id &&
+              o.type !== 'frame' &&
               o.x >= fx &&
               o.y >= fy &&
               (o.x + (o.width ?? 0)) <= fRight &&
@@ -411,6 +421,19 @@ export function Board() {
             pushAction({ type: 'update', changes: [{ id: o.id, before: { frameId: o.frameId }, after: { frameId: newObject.id } }] });
             updateObject(o.id, { frameId: newObject.id });
           });
+        } else if (type !== 'line' && type !== 'arrow-single' && type !== 'arrow-double') {
+          // Auto-assign new shape to a containing frame if it lands inside one
+          const right = newObject.x + newObject.width;
+          const bottom = newObject.y + newObject.height;
+          const containingFrame = objects.find(
+            (o) => o.type === 'frame' &&
+              o.x <= newObject.x && o.y <= newObject.y &&
+              o.x + o.width >= right && o.y + o.height >= bottom
+          );
+          if (containingFrame) {
+            pushAction({ type: 'update', changes: [{ id: newObject.id, before: { frameId: undefined }, after: { frameId: containingFrame.id } }] });
+            updateObject(newObject.id, { frameId: containingFrame.id });
+          }
         }
       })
       .catch((err) => {
@@ -588,7 +611,7 @@ export function Board() {
     ) ?? null;
   }, [objects]);
 
-  /** Return objects whose AABB is fully inside the frame bounds (excluding the frame itself). */
+  /** Return objects whose AABB is fully inside the frame bounds (excluding the frame itself and other frames). */
   const detectShapesInFrame = useCallback((frame: BoardObject, objectList: BoardObject[]) => {
     const fx = frame.x;
     const fy = frame.y;
@@ -597,6 +620,7 @@ export function Board() {
     return objectList.filter(
       (o) =>
         o.id !== frame.id &&
+        o.type !== 'frame' &&
         o.x >= fx &&
         o.y >= fy &&
         (o.x + (o.width ?? 0)) <= fRight &&
@@ -623,16 +647,6 @@ export function Board() {
     [objects]
   );
 
-  /** True if point (px, py) is inside frame's axis-aligned bounds (ignores frame rotation). */
-  const isPointInFrameBounds = useCallback((px: number, py: number, frame: BoardObject) => {
-    return (
-      px >= frame.x &&
-      px <= frame.x + frame.width &&
-      py >= frame.y &&
-      py <= frame.y + frame.height
-    );
-  }, []);
-
   const handleObjectUpdate = useCallback(
     (id: string, updates: Partial<BoardObject>) => {
       const obj = objects.find((o) => o.id === id);
@@ -643,7 +657,7 @@ export function Board() {
         pushAction({ type: 'update', changes: [{ id, before, after: updates }] });
       }
 
-      // When a frame is moved/resized/rotated, sync all contained shapes — batch into one Firestore write to reduce lag
+      // When a frame is moved/resized/rotated, proportionally transform all contained shapes
       if (obj?.type === 'frame') {
         const children = getShapesInFrame(id);
         if (children.length > 0) {
@@ -666,23 +680,18 @@ export function Board() {
           for (const child of children) {
             const relX = child.x - oldX;
             const relY = child.y - oldY;
-            const newChildX = newX + relX * scaleX;
-            const newChildY = newY + relY * scaleY;
-            const newChildW = Math.max(20, child.width * scaleX);
-            const newChildH = Math.max(20, child.height * scaleY);
-            const newChildRot = (child.rotation ?? 0) + rotDelta;
-
             childChanges.push({
               objectId: child.id,
               updates: {
-                x: newChildX,
-                y: newChildY,
-                width: newChildW,
-                height: newChildH,
-                rotation: newChildRot,
+                x: newX + relX * scaleX,
+                y: newY + relY * scaleY,
+                width: Math.max(20, child.width * scaleX),
+                height: Math.max(20, child.height * scaleY),
+                rotation: (child.rotation ?? 0) + rotDelta,
               },
             });
           }
+
           pushAction({
             type: 'update',
             changes: childChanges.map(({ objectId: cid, updates: u }) => {
@@ -711,26 +720,39 @@ export function Board() {
             updateObject(id, { frameId: containing.id });
           }
         } else if (obj.frameId !== undefined) {
+          // Use AABB check consistent with enter: shape must be fully inside to stay
           const frame = objects.find((o) => o.type === 'frame' && o.id === obj.frameId);
-          const centerX = newX + newW / 2;
-          const centerY = newY + newH / 2;
-          const stillInsideFrame = frame && isPointInFrameBounds(centerX, centerY, frame);
-          if (!stillInsideFrame) {
+          const stillFullyInside = frame &&
+            newX >= frame.x && newY >= frame.y &&
+            newX + newW <= frame.x + frame.width && newY + newH <= frame.y + frame.height;
+          if (!stillFullyInside) {
             pushAction({ type: 'update', changes: [{ id, before: { frameId: obj.frameId }, after: { frameId: undefined } }] });
             updateObject(id, { frameId: undefined });
+            const detachedFromFrameId = obj.frameId;
+            setSelectedObjectIds((prev) => {
+              if (!prev.includes(id) || !prev.includes(detachedFromFrameId)) return prev;
+              return prev.filter((oid) => {
+                if (oid === id) return true;
+                if (oid === detachedFromFrameId) return false;
+                const selectedObj = objects.find((o) => o.id === oid);
+                return selectedObj?.frameId !== detachedFromFrameId;
+              });
+            });
           }
         }
       }
     },
-    [objects, updateObject, batchUpdateObjects, pushAction, getShapesInFrame, getFrameContainingRect, isPointInFrameBounds]
+    [objects, updateObject, batchUpdateObjects, pushAction, getShapesInFrame, getFrameContainingRect, setSelectedObjectIds]
   );
 
   const handleBatchObjectUpdate = useCallback(
     (changes: { id: string; updates: Partial<BoardObject> }[]) => {
       if (changes.length === 0) return;
 
-      // When a frame is resized/moved in a multi-select, scale its children proportionally (same as single-frame resize)
+      // When a frame is moved/resized in a multi-select, proportionally transform all children
       const resolvedChanges = [...changes];
+      // Track children that were moved BY a frame — skip containment re-check for these
+      const movedByFrame = new Set<string>();
 
       for (const { id, updates: ups } of changes) {
         const obj = objects.find((o) => o.id === id);
@@ -754,19 +776,15 @@ export function Board() {
 
         const children = getShapesInFrame(id);
         for (const child of children) {
+          movedByFrame.add(child.id);
           const relX = child.x - oldX;
           const relY = child.y - oldY;
-          const newChildX = newX + relX * scaleX;
-          const newChildY = newY + relY * scaleY;
-          const newChildW = Math.max(child.type === 'line' ? 0 : 20, child.width * scaleX);
-          const newChildH = Math.max(child.type === 'line' ? 0 : 20, child.height * scaleY);
-          const newChildRot = (child.rotation ?? 0) + rotDelta;
           const childUpdates: Partial<BoardObject> = {
-            x: newChildX,
-            y: newChildY,
-            width: newChildW,
-            height: newChildH,
-            rotation: newChildRot,
+            x: newX + relX * scaleX,
+            y: newY + relY * scaleY,
+            width: Math.max(child.type === 'line' ? 0 : 20, child.width * scaleX),
+            height: Math.max(child.type === 'line' ? 0 : 20, child.height * scaleY),
+            rotation: (child.rotation ?? 0) + rotDelta,
           };
           const idx = resolvedChanges.findIndex((c) => c.id === child.id);
           if (idx >= 0) resolvedChanges[idx] = { id: child.id, updates: childUpdates };
@@ -788,8 +806,9 @@ export function Board() {
         pushAction({ type: 'update', changes: undoChanges });
       }
       batchUpdateObjects(resolvedChanges.map(({ id, updates: ups }) => ({ objectId: id, updates: ups })));
-      // Frame containment for each moved object
+      // Frame containment for each moved object — skip children that were moved BY their parent frame
       resolvedChanges.forEach(({ id, updates: ups }) => {
+        if (movedByFrame.has(id)) return;
         const obj = objects.find((o) => o.id === id);
         if (!obj || obj.type === 'frame') return;
         if (ups.x === undefined && ups.y === undefined && ups.width === undefined && ups.height === undefined) return;
@@ -802,18 +821,19 @@ export function Board() {
           pushAction({ type: 'update', changes: [{ id, before: { frameId: obj.frameId }, after: { frameId: containing.id } }] });
           updateObject(id, { frameId: containing.id });
         } else if (!containing && obj.frameId !== undefined) {
+          // Use AABB check consistent with enter: shape must be fully inside to stay
           const frame = objects.find((o) => o.type === 'frame' && o.id === obj.frameId);
-          const centerX = newX + newW / 2;
-          const centerY = newY + newH / 2;
-          const stillInsideFrame = frame && isPointInFrameBounds(centerX, centerY, frame);
-          if (!stillInsideFrame) {
+          const stillFullyInside = frame &&
+            newX >= frame.x && newY >= frame.y &&
+            newX + newW <= frame.x + frame.width && newY + newH <= frame.y + frame.height;
+          if (!stillFullyInside) {
             pushAction({ type: 'update', changes: [{ id, before: { frameId: obj.frameId }, after: { frameId: undefined } }] });
             updateObject(id, { frameId: undefined });
           }
         }
       });
     },
-    [objects, updateObject, batchUpdateObjects, pushAction, getShapesInFrame, getFrameContainingRect, isPointInFrameBounds]
+    [objects, updateObject, batchUpdateObjects, pushAction, getShapesInFrame, getFrameContainingRect]
   );
 
   const handleObjectDelete = useCallback(
@@ -1149,6 +1169,7 @@ export function Board() {
           rotation: 0,
           text: `Frame ${existingFrameCount + 1}`,
           color: '#3366ff',
+          zIndex: 0,
           createdBy: user.uid,
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -1445,6 +1466,7 @@ export function Board() {
           <PresenceBar onlineUsers={onlineUsers} />
           <div
             ref={canvasContainerRef}
+            data-testid="canvas-area"
             className={`canvas-area${isDraggingShapeFromSidebar ? ' dragging-shape' : ''}`}
             style={{ position: 'relative' }}
             onDragOver={handleCanvasDragOver}

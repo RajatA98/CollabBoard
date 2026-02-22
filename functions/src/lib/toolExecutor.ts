@@ -22,6 +22,7 @@ import {
   rotateMultipleObjects as toolsRotateMultipleObjects,
   updateText as toolsUpdateText,
   changeColor as toolsChangeColor,
+  changeMultipleColors as toolsChangeMultipleColors,
   deleteObject as toolsDeleteObject,
   deleteMultipleObjects as toolsDeleteMultipleObjects,
   clearBoard as toolsClearBoard,
@@ -38,8 +39,10 @@ type CreateStickyNotesInput = {
     y: number;
     color: string;
     exactPosition?: boolean;
+    frameId?: string;
   }>;
   exactPosition?: boolean;
+  frameId?: string;
   _genOrigin?: { x: number; y: number };
   _baseZIndex?: number;
 };
@@ -65,8 +68,10 @@ type CreateShapesInput = {
     color?: string;
     waypoints?: Array<{ x: number; y: number }>;
     exactPosition?: boolean;
+    frameId?: string;
   }>;
   exactPosition?: boolean;
+  frameId?: string;
   _genOrigin?: { x: number; y: number };
   _baseZIndex?: number;
 };
@@ -90,8 +95,10 @@ type CreateTextBoxesInput = {
     width?: number;
     height?: number;
     exactPosition?: boolean;
+    frameId?: string;
   }>;
   exactPosition?: boolean;
+  frameId?: string;
   _genOrigin?: { x: number; y: number };
   _baseZIndex?: number;
 };
@@ -195,6 +202,14 @@ export async function changeColor(
   userId?: string
 ) {
   return toolsChangeColor(boardId, userId ?? "ai", input);
+}
+
+export async function changeMultipleColors(
+  boardId: string,
+  input: { changes: Array<{ objectId: string; color: string }> },
+  userId?: string
+) {
+  return toolsChangeMultipleColors(boardId, userId ?? "ai", input);
 }
 
 export async function deleteObject(

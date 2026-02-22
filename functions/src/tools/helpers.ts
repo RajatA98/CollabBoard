@@ -97,6 +97,33 @@ export function getNonOverlappingPosition(
   return {x: desiredX, y: desiredY};
 }
 
+/**
+ * Return the id of the first frame that fully contains the given rect,
+ * or undefined if no frame contains it. Mirrors the frontend's
+ * auto-containment logic in Board.tsx.
+ */
+export function findContainingFrame(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  frames: Array<{ id: string; x: number; y: number; width: number; height: number }>
+): string | undefined {
+  const right = x + width;
+  const bottom = y + height;
+  for (const f of frames) {
+    if (
+      x >= f.x &&
+      y >= f.y &&
+      right <= f.x + f.width &&
+      bottom <= f.y + f.height
+    ) {
+      return f.id;
+    }
+  }
+  return undefined;
+}
+
 /** Gap (px) to the right of existing content when starting a new AI gen in empty space. */
 const GEN_ORIGIN_GAP = 40;
 

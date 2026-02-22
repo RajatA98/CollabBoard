@@ -289,6 +289,7 @@ export function Canvas({
   const drawingSnapRef = useRef<SnapCandidate | null>(null);
 
   const [isDraggingNode, setIsDraggingNode] = useState(false);
+  const [dropTargetFrameId, setDropTargetFrameId] = useState<string | null>(null);
 
   /** When multi-select: current visual position/size/rotation of each selected node (for ConnectionPoints and line overrides). */
   const multiSelectDisplayRef = useRef<Map<string, { x: number; y: number; width: number; height: number; rotation: number }>>(new Map());
@@ -299,6 +300,7 @@ export function Canvas({
   }, [objects]);
   /** When dragging multi-select via marquee rect: rect start position. */
   const multiSelectDragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const dragEndHandledRef = useRef(false);
 
   // Selected line (only when single selection of a line)
   const selectedLine = selectedObjectIds.length === 1
@@ -558,17 +560,28 @@ export function Canvas({
     (draggedId: string) => {
       setIsDraggingNode(true);
       setHoveredShapeId(null);
-      const idsBeingDragged =
-        selectedObjectIds.includes(draggedId) && selectedObjectIds.length > 1
-          ? selectedObjectIds
-          : [draggedId];
-      onDragStart?.(idsBeingDragged);
+      dragEndHandledRef.current = false;
 
+      // Determine which objects should move together.
+      // For frames: always include children so they move in sync even if the frame wasn't pre-selected.
+      const draggedObj = objects.find((o) => o.id === draggedId);
+      let effectiveIds: string[];
       if (selectedObjectIds.includes(draggedId) && selectedObjectIds.length > 1) {
+        effectiveIds = selectedObjectIds;
+      } else if (draggedObj?.type === 'frame') {
+        const childIds = objects.filter((o) => o.frameId === draggedId).map((o) => o.id);
+        effectiveIds = childIds.length > 0 ? [draggedId, ...childIds] : [draggedId];
+      } else {
+        effectiveIds = [draggedId];
+      }
+
+      onDragStart?.(effectiveIds);
+
+      if (effectiveIds.length > 1) {
         const stage = stageRef.current;
         if (!stage) return;
         const positions = new Map<string, { x: number; y: number }>();
-        selectedObjectIds.forEach((id) => {
+        effectiveIds.forEach((id) => {
           const node = stage.findOne('#' + id);
           if (node) positions.set(id, { x: node.x(), y: node.y() });
         });
@@ -577,23 +590,21 @@ export function Canvas({
         dragStartPositionsRef.current = null;
       }
     },
-    [selectedObjectIds, onDragStart]
+    [selectedObjectIds, onDragStart, objects]
   );
 
   const handleObjectDragMove = useCallback(
     (draggedId: string, newX: number, newY: number) => {
       const positions = dragStartPositionsRef.current;
-      if (!positions || selectedObjectIds.length <= 1) return;
+      if (!positions || positions.size <= 1) return;
       const startPos = positions.get(draggedId);
       if (!startPos) return;
       const dx = newX - startPos.x;
       const dy = newY - startPos.y;
       const stage = stageRef.current;
       if (!stage) return;
-      selectedObjectIds.forEach((id) => {
+      positions.forEach((pos, id) => {
         if (id === draggedId) return;
-        const pos = positions.get(id);
-        if (!pos) return;
         const node = stage.findOne('#' + id);
         if (node) {
           node.x(pos.x + dx);
@@ -602,36 +613,37 @@ export function Canvas({
       });
       stage.findOne('.konva-transformer')?.getLayer()?.batchDraw();
     },
-    [selectedObjectIds]
+    []
   );
 
   const handleObjectDragEnd = useCallback(
     (draggedId: string, finalX: number, finalY: number) => {
+      dragEndHandledRef.current = true;
       const positions = dragStartPositionsRef.current;
-      // Unmark before writing so Firestore snapshot after update uses fresh data
-      const idsBeingDragged =
-        positions && selectedObjectIds.length > 1 ? selectedObjectIds : [draggedId];
-      onDragEnd?.(idsBeingDragged);
-      if (!positions || selectedObjectIds.length <= 1) {
+      // Use positions ref as source of truth for dragged IDs (handles click-drag on unselected frames)
+      const draggedIds = positions && positions.size > 1 ? Array.from(positions.keys()) : [draggedId];
+      onDragEnd?.(draggedIds);
+      if (!positions || positions.size <= 1) {
         onObjectUpdate(draggedId, { x: finalX, y: finalY });
+        dragStartPositionsRef.current = null;
         return;
       }
       const startPos = positions.get(draggedId);
-      if (!startPos) return;
+      if (!startPos) { dragStartPositionsRef.current = null; return; }
       const dx = finalX - startPos.x;
       const dy = finalY - startPos.y;
 
-      const selectedIdsSet = new Set(selectedObjectIds);
+      const draggedIdsSet = new Set(draggedIds);
       const buildVirtualShape = (obj: BoardObject): BoardObject => {
         const pos = positions.get(obj.id);
-        if (pos && selectedIdsSet.has(obj.id)) {
+        if (pos && draggedIdsSet.has(obj.id)) {
           return { ...obj, x: pos.x + dx, y: pos.y + dy };
         }
         return obj;
       };
 
       const changes: { id: string; updates: Partial<BoardObject> }[] = [];
-      for (const id of selectedObjectIds) {
+      for (const id of draggedIds) {
         const pos = positions.get(id);
         if (!pos) continue;
         const obj = objects.find(o => o.id === id);
@@ -678,7 +690,7 @@ export function Canvas({
         }
       }
 
-      const shapeUpdates = selectedObjectIds
+      const shapeUpdates = draggedIds
         .filter((id) => {
           const obj = objects.find((o) => o.id === id);
           return obj && obj.type !== 'line';
@@ -698,7 +710,7 @@ export function Canvas({
         })
         .filter((u): u is NonNullable<typeof u> => u != null);
       const lineUpdates = computeConnectedLineUpdates(shapeUpdates, objects).filter(
-        (lu) => !selectedIdsSet.has(lu.id),
+        (lu) => !draggedIdsSet.has(lu.id),
       );
       changes.push(...lineUpdates);
 
@@ -709,13 +721,14 @@ export function Canvas({
       }
       dragStartPositionsRef.current = null;
     },
-    [selectedObjectIds, objects, onObjectUpdate, onBatchObjectUpdate, onDragEnd]
+    [objects, onObjectUpdate, onBatchObjectUpdate, onDragEnd]
   );
 
   const handleMultiSelectMarqueeDragStart = useCallback(
     (e: Konva.KonvaEventObject<DragEvent>) => {
       const rect = e.target;
       multiSelectDragStartRef.current = { x: rect.x(), y: rect.y() };
+      dragEndHandledRef.current = false;
       onDragStart?.(selectedObjectIds);
       const stage = stageRef.current;
       if (!stage || selectedObjectIds.length <= 1) return;
@@ -764,6 +777,7 @@ export function Canvas({
       multiSelectDragStartRef.current = null;
       setIsDraggingNode(false);
       if (!start || !positions || selectedObjectIds.length <= 1) {
+        dragEndHandledRef.current = true;
         onDragEnd?.(selectedObjectIds);
         return;
       }
@@ -771,8 +785,8 @@ export function Canvas({
       const dy = rect.y() - start.y;
       const firstId = selectedObjectIds[0];
       const pos = positions.get(firstId);
-      if (!pos) { onDragEnd?.(selectedObjectIds); return; }
-      // handleObjectDragEnd already calls onDragEnd, so no need to call it here
+      if (!pos) { dragEndHandledRef.current = true; onDragEnd?.(selectedObjectIds); return; }
+      // handleObjectDragEnd already calls onDragEnd and sets dragEndHandledRef
       handleObjectDragEnd(firstId, pos.x + dx, pos.y + dy);
     },
     [selectedObjectIds, handleObjectDragEnd, onDragEnd]
@@ -933,19 +947,40 @@ export function Canvas({
     transformer.getLayer()?.batchDraw();
   }, [selectedObjectIds, objects]);
 
-  // Helper to create onDragMove handler for broadcasting
+  // Helper to create onDragMove handler for broadcasting + frame drop target detection
   const makeDragMoveHandler = useCallback(
     (obj: BoardObject) => (e: Konva.KonvaEventObject<DragEvent>) => {
       const node = e.target;
       handleObjectDragMove(obj.id, node.x(), node.y());
       onBroadcastTransform?.(obj.id, node.x(), node.y(), obj.width, obj.height, obj.rotation || 0);
+      // Detect if a non-frame shape is being dragged over a frame for drop target highlight
+      if (obj.type !== 'frame') {
+        const cx = node.x() + obj.width / 2;
+        const cy = node.y() + obj.height / 2;
+        const targetFrame = objects.find(
+          (o) => o.type === 'frame' && o.id !== obj.frameId &&
+            cx >= o.x && cx <= o.x + o.width && cy >= o.y && cy <= o.y + o.height
+        );
+        setDropTargetFrameId(targetFrame?.id ?? null);
+      }
     },
-    [onBroadcastTransform, handleObjectDragMove]
+    [onBroadcastTransform, handleObjectDragMove, objects]
   );
 
   const handleDragEndExtra = useCallback(() => {
     onClearTransform?.();
-  }, [onClearTransform]);
+    setDropTargetFrameId(null);
+    setIsDraggingNode(false);
+    // Only call onDragEnd if handleObjectDragEnd didn't already handle it.
+    // This prevents double-calling unmarkDragging which leaves stale IDs.
+    if (!dragEndHandledRef.current) {
+      const positions = dragStartPositionsRef.current;
+      if (positions && positions.size > 1) {
+        onDragEnd?.(Array.from(positions.keys()));
+      }
+    }
+    dragStartPositionsRef.current = null;
+  }, [onClearTransform, onDragEnd]);
 
   // ── Connected-line helpers ──────────────────────────────────────────────
   const updateConnectedLines = useCallback((shapeId: string, newX: number, newY: number, newW: number, newH: number, newRot: number) => {
@@ -1370,7 +1405,7 @@ export function Canvas({
               case 'line':
                 return <LineShape {...commonProps} object={displayObj} />;
               case 'frame':
-                return <Frame {...commonProps} />;
+                return <Frame {...commonProps} isDropTarget={dropTargetFrameId === obj.id} />;
               default:
                 return <Rectangle {...commonProps} />;
             }
@@ -1430,7 +1465,7 @@ export function Canvas({
                     case 'line':
                       return <LineShape {...selectedCommon} object={displayObject} />;
                     case 'frame':
-                      return <Frame {...selectedCommon} />;
+                      return <Frame {...selectedCommon} isDropTarget={dropTargetFrameId === obj.id} />;
                     default:
                       return <Rectangle {...selectedCommon} />;
                   }
