@@ -516,17 +516,15 @@ export function Canvas({
       setIsDraggingNode(true);
       setHoveredShapeId(null);
 
-      // For frames: always drag children along with the frame even if not yet in selectedObjectIds.
-      // This ensures a click-drag on an unselected frame still moves its children live.
+      // Determine which objects should move together.
+      // For frames: always include children so they move in sync even if the frame wasn't pre-selected.
       const draggedObj = objects.find((o) => o.id === draggedId);
       let effectiveIds: string[];
       if (selectedObjectIds.includes(draggedId) && selectedObjectIds.length > 1) {
         effectiveIds = selectedObjectIds;
       } else if (draggedObj?.type === 'frame') {
         const childIds = objects.filter((o) => o.frameId === draggedId).map((o) => o.id);
-        effectiveIds = [draggedId, ...childIds];
-        // Also update selection so drag end handles batch correctly
-        onSelectObject(draggedId, false);
+        effectiveIds = childIds.length > 0 ? [draggedId, ...childIds] : [draggedId];
       } else {
         effectiveIds = [draggedId];
       }
@@ -546,7 +544,7 @@ export function Canvas({
         dragStartPositionsRef.current = null;
       }
     },
-    [selectedObjectIds, onDragStart, objects, onSelectObject]
+    [selectedObjectIds, onDragStart, objects]
   );
 
   const handleObjectDragMove = useCallback(
@@ -922,7 +920,15 @@ export function Canvas({
   const handleDragEndExtra = useCallback(() => {
     onClearTransform?.();
     setDropTargetFrameId(null);
-  }, [onClearTransform]);
+    setIsDraggingNode(false);
+    // Clean up positions ref and unmark dragging for frame children that were
+    // dragged via the non-selected code path (where handleObjectDragEnd isn't called).
+    const positions = dragStartPositionsRef.current;
+    if (positions && positions.size > 1) {
+      onDragEnd?.(Array.from(positions.keys()));
+      dragStartPositionsRef.current = null;
+    }
+  }, [onClearTransform, onDragEnd]);
 
   // ── Connected-line helpers ──────────────────────────────────────────────
   const updateConnectedLines = useCallback((shapeId: string, newX: number, newY: number, newW: number, newH: number, newRot: number) => {
