@@ -597,8 +597,19 @@ html, body, #root {
   background: rgba(254, 226, 226, 0.9);
   color: #991b1b;
 }
-.ai-command-panel-bubble-locked {
-  background: rgba(254, 243, 199, 0.9);
+.ai-command-panel-inline-stop {
+  display: inline;
+  margin-left: 8px;
+  background: none;
+  border: none;
+  color: #b45309;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0 2px;
+}
+.ai-command-panel-inline-stop:hover {
   color: #92400e;
 }
 .ai-command-panel-body {

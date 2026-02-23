@@ -1,5 +1,6 @@
 import {config as loadEnv} from "dotenv";
 import path from "path";
+import crypto from "crypto";
 import * as admin from "firebase-admin";
 import {setGlobalOptions} from "firebase-functions";
 import {defineSecret, defineString} from "firebase-functions/params";
@@ -56,10 +57,11 @@ export const aiCommand = onCall(
       throw new HttpsError("unauthenticated", "Must be logged in");
     }
 
-    const {command, commands, boardId, imageBase64, imageMediaType, history} = request.data as {
+    const {command, commands, boardId, commandId: clientCommandId, imageBase64, imageMediaType, history} = request.data as {
       command?: string;
       commands?: string[];
       boardId?: string;
+      commandId?: string;
       imageBase64?: string;
       imageMediaType?: string;
       history?: Array<{ role: "user" | "assistant"; content: string }>;
@@ -93,32 +95,21 @@ export const aiCommand = onCall(
       ? commandList
       : [singleCommand || (hasImage ? "What do you see in this image? Describe or create shapes based on it." : "")];
 
-    // AI lock — prevent concurrent agent runs on the same board
-    const lockRef = rtdb.ref(`boards/${boardId}/aiLock`);
-    const lockSnap = await lockRef.get();
-
-    if (lockSnap.exists()) {
-      const lock = lockSnap.val() as {startedAt: number};
-      if (Date.now() - lock.startedAt < 30000) {
-        throw new HttpsError(
-          "resource-exhausted",
-          "AI is already processing a command for this board. Please wait."
-        );
-      }
-    }
-
-    const lockLabel = toRun.length > 1 ? `${toRun.length} commands` : (toRun[0] || (hasImage ? "(image)" : ""));
-    await lockRef.set({
+    // Per-command tracking — each command gets its own entry so multiple can run concurrently
+    const commandId = (typeof clientCommandId === "string" && clientCommandId.length > 0)
+      ? clientCommandId
+      : crypto.randomUUID();
+    const commandRef = rtdb.ref(`boards/${boardId}/aiCommands/${commandId}`);
+    const commandLabel = toRun.length > 1 ? `${toRun.length} commands` : (toRun[0] || (hasImage ? "(image)" : ""));
+    await commandRef.set({
       userId: request.auth.uid,
-      command: lockLabel,
+      command: commandLabel,
+      status: "processing",
       startedAt: Date.now(),
     });
 
-    const cancelRef = rtdb.ref(`boards/${boardId}/aiCancel`);
-    await cancelRef.remove();
-
     const checkCancel = async (): Promise<boolean> => {
-      const snap = await cancelRef.get();
+      const snap = await commandRef.child("cancel").get();
       return snap.exists() && Boolean(snap.val());
     };
 
@@ -133,7 +124,6 @@ export const aiCommand = onCall(
       for (let i = 0; i < toRun.length; i++) {
         if (await checkCancel()) {
           cancelled = true;
-          await lockRef.remove();
           break;
         }
         const cmd = toRun[i];
@@ -149,7 +139,6 @@ export const aiCommand = onCall(
 
         if (result.cancelled) {
           cancelled = true;
-          await lockRef.remove();
           break;
         }
 
@@ -173,10 +162,10 @@ export const aiCommand = onCall(
         toolsExecuted: allToolsExecuted,
         objectsCreated: allObjectsCreated,
         iterations: totalIterations,
+        commandId,
       };
     } finally {
-      await lockRef.remove();
-      await cancelRef.remove();
+      await commandRef.remove();
     }
   }
 );
