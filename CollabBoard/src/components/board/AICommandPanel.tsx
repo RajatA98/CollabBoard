@@ -1,19 +1,19 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { httpsCallable } from 'firebase/functions';
-import { ref, set, onValue } from 'firebase/database';
+import { ref, set, onValue, DataSnapshot } from 'firebase/database';
 import { functions, rtdb } from '../../firebase/config';
 
 interface AICommandPanelProps {
   boardId: string;
+  userId: string;
   onClose?: () => void;
 }
-
-type PanelState = 'idle' | 'loading' | 'success' | 'locked' | 'error';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
-  status?: 'error' | 'success' | 'locked';
+  status?: 'error' | 'success';
+  commandId?: string;
 }
 
 /** Pasted image for the current compose: base64 (no data URL prefix) + media type for API. */
@@ -25,11 +25,20 @@ interface PastedImage {
   dataUrl: string;
 }
 
+/** Shape of an active command entry in RTDB */
+interface RemoteCommand {
+  userId: string;
+  command: string;
+  status: string;
+  startedAt: number;
+}
+
 // Match server timeout (120s); client timeout in ms. Without this, default 60s causes "deadline exceeded".
 const aiCommandFn = httpsCallable(functions, 'aiCommand', { timeout: 130000 });
 
 const MAX_IMAGE_DIMENSION = 1200;
 const JPEG_QUALITY = 0.85;
+const STALE_COMMAND_THRESHOLD_MS = 120_000;
 
 /** Compress image to JPEG and resize so payload fits Firebase callable limit (~10MB). Returns base64 + 'image/jpeg'. */
 function compressImageForUpload(img: PastedImage): Promise<{ base64: string; mediaType: string }> {
@@ -95,17 +104,23 @@ function generateId(): string {
   return Math.random().toString(36).slice(2, 12);
 }
 
-export function AICommandPanel({ boardId }: AICommandPanelProps) {
+export function AICommandPanel({ boardId, userId }: AICommandPanelProps) {
   const [input, setInput] = useState('');
   const [pastedImages, setPastedImages] = useState<PastedImage[]>([]);
-  const [state, setState] = useState<PanelState>('idle');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [aiLockPresent, setAiLockPresent] = useState(false);
-  const [stopRequestedAt, setStopRequestedAt] = useState<number | null>(null);
+  const [remoteCommands, setRemoteCommands] = useState<Record<string, RemoteCommand>>({});
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const cancelRejectRef = useRef<((reason: Error) => void) | null>(null);
+
+  // Track in-flight commands: commandId → cancel reject function
+  const inFlightRef = useRef<Map<string, (reason: Error) => void>>(new Map());
+  // Track which commandIds have had stop requested
+  const stoppedCommandsRef = useRef<Set<string>>(new Set());
+  // Force re-render when in-flight set changes
+  const [inFlightCount, setInFlightCount] = useState(0);
+
+  const hasInFlight = inFlightCount > 0;
 
   // Auto-focus input when panel mounts
   useEffect(() => {
@@ -124,12 +139,24 @@ export function AICommandPanel({ boardId }: AICommandPanelProps) {
     };
   }, []);
 
-  // Listen for aiLock so we can show "Stop AI" after refresh (run still going on backend)
+  // Listen for active aiCommands (for post-refresh recovery)
   useEffect(() => {
-    const lockRef = ref(rtdb, `boards/${boardId}/aiLock`);
-    const unsubscribe = onValue(lockRef, (snap) => {
-      setAiLockPresent(snap.exists());
-      if (!snap.exists()) setStopRequestedAt(null);
+    const cmdsRef = ref(rtdb, `boards/${boardId}/aiCommands`);
+    const unsubscribe = onValue(cmdsRef, (snap: DataSnapshot) => {
+      if (!snap.exists()) {
+        setRemoteCommands({});
+        return;
+      }
+      const val = snap.val() as Record<string, RemoteCommand>;
+      const now = Date.now();
+      const active: Record<string, RemoteCommand> = {};
+      for (const [id, cmd] of Object.entries(val)) {
+        // Only show commands that are not stale and not tracked locally
+        if (cmd.status === 'processing' && now - cmd.startedAt < STALE_COMMAND_THRESHOLD_MS && !inFlightRef.current.has(id)) {
+          active[id] = cmd;
+        }
+      }
+      setRemoteCommands(active);
     });
     return unsubscribe;
   }, [boardId]);
@@ -158,9 +185,32 @@ export function AICommandPanel({ boardId }: AICommandPanelProps) {
     setPastedImages((prev) => prev.filter((img) => img.id !== id));
   }, []);
 
+  const updateMessageByCommandId = useCallback((commandId: string, update: Partial<ChatMessage>) => {
+    setMessages((prev) => {
+      const idx = prev.findIndex((m) => m.commandId === commandId && m.role === 'assistant');
+      if (idx === -1) return prev;
+      const next = [...prev];
+      next[idx] = { ...next[idx], ...update };
+      return next;
+    });
+  }, []);
+
+  const handleStopCommand = useCallback((commandId: string) => {
+    stoppedCommandsRef.current.add(commandId);
+    // Signal cancel via RTDB
+    set(ref(rtdb, `boards/${boardId}/aiCommands/${commandId}/cancel`), true).catch((err) => {
+      console.error('Failed to send stop signal:', err);
+    });
+    // Reject the local promise if we have it
+    const rejectFn = inFlightRef.current.get(commandId);
+    if (rejectFn) {
+      rejectFn(new Error('cancelled'));
+    }
+  }, [boardId]);
+
   const handleSubmit = useCallback(async () => {
     const raw = input.trim();
-    if ((!raw && pastedImages.length === 0) || state === 'loading') return;
+    if (!raw && pastedImages.length === 0) return;
 
     // Multiple commands sequentially (Cursor-style): newline-separated lines become commands[]
     const lines = raw.split(/\n/).map((s) => s.trim()).filter(Boolean);
@@ -168,42 +218,47 @@ export function AICommandPanel({ boardId }: AICommandPanelProps) {
     const commands = lines.length > 1 ? lines : undefined;
 
     const imageToSend = pastedImages[0] ?? null;
+    const commandId = generateId();
+
     setInput('');
     setPastedImages([]);
-    setState('loading');
     const userDisplay = commands
-      ? `${commands.length} commands: ${commands.join(' → ')}`
+      ? `${commands.length} commands: ${commands.join(' \u2192 ')}`
       : (singleCommand ? (imageToSend ? `${singleCommand} (with image)` : singleCommand) : '(image)');
     setMessages((prev) => [
       ...prev,
-      { role: 'user', content: userDisplay },
-      { role: 'assistant', content: 'Thinking...' },
+      { role: 'user', content: userDisplay, commandId },
+      { role: 'assistant', content: 'Thinking...', commandId },
     ]);
-    cancelRejectRef.current = null;
 
+    // Set up per-command cancel promise
     const cancelPromise = new Promise<never>((_, reject) => {
-      cancelRejectRef.current = (reason: Error) => reject(reason);
+      inFlightRef.current.set(commandId, reject);
+      setInFlightCount(inFlightRef.current.size);
     });
 
     let compressedImage: { base64: string; mediaType: string } | null = null;
     if (imageToSend) {
       try {
         compressedImage = await compressImageForUpload(imageToSend);
-      } catch (err) {
-        setState('error');
-        setMessages((prev) => {
-          const next = [...prev];
-          next[next.length - 1] = { role: 'assistant', content: 'Could not process the image. Try a smaller or different image.', status: 'error' };
-          return next;
+      } catch {
+        inFlightRef.current.delete(commandId);
+        setInFlightCount(inFlightRef.current.size);
+        updateMessageByCommandId(commandId, {
+          content: 'Could not process the image. Try a smaller or different image.',
+          status: 'error',
         });
         return;
       }
     }
 
+    // Snapshot current messages for history (exclude the messages we just added)
+    const historyMessages = messages;
     const payload = {
       ...(commands ? { commands } : { command: singleCommand || 'What do you see in this image? Describe or create shapes based on it.' }),
       boardId,
-      history: messages.map((m) => ({ role: m.role, content: m.content })),
+      commandId,
+      history: historyMessages.map((m) => ({ role: m.role, content: m.content })),
       ...(compressedImage && {
         imageBase64: compressedImage.base64,
         imageMediaType: compressedImage.mediaType,
@@ -215,7 +270,6 @@ export function AICommandPanel({ boardId }: AICommandPanelProps) {
         aiCommandFn(payload),
         cancelPromise,
       ]);
-      cancelRejectRef.current = null;
 
       const data = result.data as {
         success: boolean;
@@ -223,78 +277,35 @@ export function AICommandPanel({ boardId }: AICommandPanelProps) {
         reply?: string;
         objectsCreated: string[];
         toolsExecuted: string[];
+        commandId?: string;
       };
 
       if (data.cancelled) {
-        setState('idle');
-        setMessages((prev) => {
-          const next = [...prev];
-          next[next.length - 1] = { role: 'assistant', content: 'Stopped.' };
-          return next;
-        });
+        updateMessageByCommandId(commandId, { content: 'Stopped.' });
         return;
       }
       if (data.success) {
-        // Use the same reply text as in Langfuse (full AI response with markdown/tables)
         const reply =
           data.reply?.trim() ||
           (data.objectsCreated.length > 0
             ? `Done! Created ${data.objectsCreated.length} object${data.objectsCreated.length !== 1 ? 's' : ''}.`
             : `Done! Executed ${data.toolsExecuted.length} action${data.toolsExecuted.length !== 1 ? 's' : ''}.`);
-        setState('success');
-        setMessages((prev) => {
-          const next = [...prev];
-          next[next.length - 1] = { role: 'assistant', content: reply, status: 'success' };
-          return next;
-        });
+        updateMessageByCommandId(commandId, { content: reply, status: 'success' });
       }
     } catch (err: unknown) {
-      cancelRejectRef.current = null;
       const error = err as { code?: string; message?: string };
       if (error.message === 'cancelled') {
-        setState('idle');
-        setMessages((prev) => {
-          const next = [...prev];
-          next[next.length - 1] = { role: 'assistant', content: 'Stopped.' };
-          return next;
-        });
+        updateMessageByCommandId(commandId, { content: 'Stopped.' });
         return;
       }
-      let content = error.message || 'Something went wrong';
-      let status: 'error' | 'locked' | undefined = 'error';
-      if (error.code === 'functions/resource-exhausted') {
-        content = 'AI is busy on this board. Try again in a moment.';
-        status = 'locked';
-      }
-      setState(status === 'locked' ? 'locked' : 'error');
-      setMessages((prev) => {
-        const next = [...prev];
-        next[next.length - 1] = { role: 'assistant', content, status };
-        return next;
-      });
+      const content = error.message || 'Something went wrong';
+      updateMessageByCommandId(commandId, { content, status: 'error' });
+    } finally {
+      inFlightRef.current.delete(commandId);
+      stoppedCommandsRef.current.delete(commandId);
+      setInFlightCount(inFlightRef.current.size);
     }
-  }, [input, pastedImages, state, boardId]);
-
-  const handleStop = useCallback(() => {
-    setStopRequestedAt(Date.now());
-    set(ref(rtdb, `boards/${boardId}/aiCancel`), true).catch((err) => {
-      console.error('Failed to send stop signal:', err);
-      setStopRequestedAt(null);
-      setMessages((prev) => {
-        const next = [...prev];
-        const last = next[next.length - 1];
-        if (last?.role === 'assistant') {
-          next[next.length - 1] = { ...last, content: 'Could not send stop signal. Try again or check database rules.', status: 'error' as const };
-        } else {
-          next.push({ role: 'assistant', content: 'Could not send stop signal. Try again or check database rules.', status: 'error' });
-        }
-        return next;
-      });
-    });
-    if (state === 'loading') {
-      cancelRejectRef.current?.(new Error('cancelled'));
-    }
-  }, [state, boardId]);
+  }, [input, pastedImages, boardId, messages, updateMessageByCommandId]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -306,21 +317,27 @@ export function AICommandPanel({ boardId }: AICommandPanelProps) {
     [handleSubmit]
   );
 
+  // Remote commands that are not tracked locally (e.g. after page refresh)
+  const remoteCommandEntries = Object.entries(remoteCommands).filter(([, cmd]) => cmd.userId === userId);
+
   return (
     <div className="ai-command-panel ai-command-panel-chat" data-testid="ai-command-panel">
       <div className="ai-command-panel-header">AI Assistant</div>
-      {aiLockPresent && state !== 'loading' && (
+      {remoteCommandEntries.length > 0 && (
         <div className="ai-command-panel-remote-running" data-testid="ai-command-remote-running">
-          {stopRequestedAt ? (
-            'Stopping…'
-          ) : (
-            <>
-              AI is running on this board (e.g. after refresh).{' '}
-              <button type="button" className="ai-command-panel-stop-link" onClick={handleStop} data-testid="ai-command-stop-remote">
+          {remoteCommandEntries.map(([cmdId, cmd]) => (
+            <div key={cmdId}>
+              AI is running: {cmd.command?.slice(0, 60) || 'command'}{' '}
+              <button
+                type="button"
+                className="ai-command-panel-stop-link"
+                onClick={() => handleStopCommand(cmdId)}
+                data-testid="ai-command-stop-remote"
+              >
                 Stop
               </button>
-            </>
-          )}
+            </div>
+          ))}
         </div>
       )}
       <div className="ai-command-panel-messages" role="log" aria-live="polite">
@@ -336,6 +353,16 @@ export function AICommandPanel({ boardId }: AICommandPanelProps) {
             data-testid={msg.role === 'assistant' ? 'ai-command-message' : undefined}
           >
             {msg.content}
+            {msg.role === 'assistant' && msg.commandId && inFlightRef.current.has(msg.commandId) && !msg.status && (
+              <button
+                type="button"
+                className="ai-command-panel-inline-stop"
+                onClick={() => handleStopCommand(msg.commandId!)}
+                data-testid="ai-command-stop-inline"
+              >
+                {stoppedCommandsRef.current.has(msg.commandId) ? 'Stopping\u2026' : 'Stop'}
+              </button>
+            )}
           </div>
         ))}
         <div ref={messagesEndRef} />
@@ -366,36 +393,25 @@ export function AICommandPanel({ boardId }: AICommandPanelProps) {
           onChange={(e) => setInput(e.target.value)}
           onPaste={handlePaste}
           onKeyDown={handleKeyDown}
-          disabled={state === 'loading'}
           data-testid="ai-command-input"
           rows={2}
         />
-        {(state === 'loading' || aiLockPresent) ? (
-          <button
-            type="button"
-            className="ai-command-panel-stop"
-            onClick={handleStop}
-            disabled={!!stopRequestedAt}
-            data-testid="ai-command-stop"
-            aria-label={stopRequestedAt ? 'Stopping AI' : 'Stop AI'}
-          >
-            {stopRequestedAt ? 'Stopping…' : 'Stop'}
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="ai-command-panel-submit"
-            onClick={handleSubmit}
-            disabled={!input.trim() && pastedImages.length === 0}
-            data-testid="ai-command-submit"
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M2 8h12M10 4l4 4-4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-        )}
+        <button
+          type="button"
+          className="ai-command-panel-submit"
+          onClick={handleSubmit}
+          disabled={!input.trim() && pastedImages.length === 0}
+          data-testid="ai-command-submit"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M2 8h12M10 4l4 4-4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
       </div>
-      <div className="ai-command-panel-hint">Enter to send · New lines = multiple commands (run in order) · Paste an image to include it</div>
+      <div className="ai-command-panel-hint">
+        Enter to send · New lines = multiple commands (run in order) · Paste an image to include it
+        {hasInFlight && ` · ${inFlightCount} command${inFlightCount !== 1 ? 's' : ''} running`}
+      </div>
     </div>
   );
 }

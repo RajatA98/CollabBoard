@@ -1496,7 +1496,7 @@ export function Board() {
           >
             <div className="ai-command-panel-backdrop" onClick={() => setAiPanelOpen(false)} aria-hidden />
             <div className="ai-command-panel-wrap">
-              <AICommandPanel boardId={boardId} onClose={() => setAiPanelOpen(false)} />
+              <AICommandPanel boardId={boardId} userId={user?.uid ?? ''} onClose={() => setAiPanelOpen(false)} />
               <button
                 type="button"
                 className="ai-command-panel-close"
