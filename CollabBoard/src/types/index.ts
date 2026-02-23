@@ -54,6 +54,7 @@ export interface CursorData {
 }
 
 export interface PresenceData {
+  userId?: string;
   name: string;
   email: string;
   color: string;

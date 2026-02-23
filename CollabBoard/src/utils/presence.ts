@@ -39,11 +39,12 @@ export function getMergedOnlineUsers(
     if (localUserPresence) {
       const lastActive = localUserPresence.lastActive ?? localUserPresence.joinedAt ?? 0;
       if (!isStale(lastActive)) {
-        result.push(localUserPresence);
+        result.push({ ...localUserPresence, userId: localUserId });
         seen.add(localUserId);
       }
     } else if (localUserFallback) {
       result.push({
+        userId: localUserId,
         name: localUserFallback.name,
         email: 'unknown',
         color: localUserFallback.color,
@@ -60,6 +61,7 @@ export function getMergedOnlineUsers(
     if (seen.has(uid)) continue;
     if (!cursor?.lastActive || isStale(cursor.lastActive)) continue;
     result.push({
+      userId: uid,
       name: cursor.name || 'Anonymous',
       email: 'unknown',
       color: cursor.color,
@@ -77,7 +79,7 @@ export function getMergedOnlineUsers(
       if (!p || p.online !== true) continue;
       const lastActive = p.lastActive ?? p.joinedAt ?? 0;
       if (isStale(lastActive)) continue;
-      result.push(p);
+      result.push({ ...p, userId: uid });
       seen.add(uid);
     }
   }

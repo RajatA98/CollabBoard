@@ -68,6 +68,26 @@ describe('Presence utilities', () => {
       expect(result.map((u) => u.name)).toContain('Bob');
       expect(result.map((u) => u.name)).toContain('Self');
     });
+
+    it('should include userId in each returned entry', () => {
+      const now = Date.now();
+      const presence: Record<string, PresenceData> = {
+        'u1': { name: 'Alice', email: 'a@t.com', color: '#f00', online: true, joinedAt: now, lastActive: now },
+      };
+      const cursors: Record<string, import('../../types').CursorData> = {
+        'u2': { x: 100, y: 200, name: 'Bob', color: '#0f0', lastActive: now },
+      };
+      const result = getMergedOnlineUsers(presence, cursors, 'u0', null, {
+        name: 'Self',
+        color: '#00f',
+      });
+      const selfEntry = result.find((u) => u.name === 'Self');
+      const aliceEntry = result.find((u) => u.name === 'Alice');
+      const bobEntry = result.find((u) => u.name === 'Bob');
+      expect(selfEntry?.userId).toBe('u0');
+      expect(aliceEntry?.userId).toBe('u1');
+      expect(bobEntry?.userId).toBe('u2');
+    });
   });
 
   describe('createPresenceData', () => {

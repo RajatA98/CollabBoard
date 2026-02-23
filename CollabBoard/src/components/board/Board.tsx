@@ -909,6 +909,20 @@ export function Board() {
     [updateCursor]
   );
 
+  const handleJumpToCursor = useCallback(
+    (userId: string) => {
+      const cursor = cursors[userId];
+      if (!cursor) return;
+      const centerX = window.innerWidth / 2;
+      const centerY = (window.innerHeight - 48) / 2;
+      setPosition(
+        centerX - cursor.x * viewport.scaleX,
+        centerY - cursor.y * viewport.scaleY
+      );
+    },
+    [cursors, viewport.scaleX, viewport.scaleY, setPosition]
+  );
+
   const openTextEditorForObject = useCallback(
     (obj: BoardObject) => {
       if (obj.type !== 'sticky' && obj.type !== 'text') return;
@@ -1507,7 +1521,7 @@ export function Board() {
               </button>
             </div>
           </div>
-          <PresenceBar onlineUsers={onlineUsers} />
+          <PresenceBar onlineUsers={onlineUsers} cursors={cursors} onJumpToCursor={handleJumpToCursor} />
           <div
             ref={canvasContainerRef}
             data-testid="canvas-area"
