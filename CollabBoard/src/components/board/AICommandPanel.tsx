@@ -6,6 +6,7 @@ import { functions, rtdb } from '../../firebase/config';
 interface AICommandPanelProps {
   boardId: string;
   onClose?: () => void;
+  onUpgradeRequired?: () => void;
 }
 
 type PanelState = 'idle' | 'loading' | 'success' | 'locked' | 'error';
@@ -95,7 +96,7 @@ function generateId(): string {
   return Math.random().toString(36).slice(2, 12);
 }
 
-export function AICommandPanel({ boardId }: AICommandPanelProps) {
+export function AICommandPanel({ boardId, onUpgradeRequired }: AICommandPanelProps) {
   const [input, setInput] = useState('');
   const [pastedImages, setPastedImages] = useState<PastedImage[]>([]);
   const [state, setState] = useState<PanelState>('idle');
@@ -262,7 +263,13 @@ export function AICommandPanel({ boardId }: AICommandPanelProps) {
       }
       let content = error.message || 'Something went wrong';
       let status: 'error' | 'locked' | undefined = 'error';
-      if (error.code === 'functions/resource-exhausted') {
+      if (error.code === 'functions/permission-denied' && error.message?.includes('UPGRADE_REQUIRED')) {
+        if (onUpgradeRequired) {
+          onUpgradeRequired();
+          return;
+        }
+        content = "You've used all 3 free AI commands. Upgrade to Pro for unlimited access.";
+      } else if (error.code === 'functions/resource-exhausted') {
         content = 'AI is busy on this board. Try again in a moment.';
         status = 'locked';
       }

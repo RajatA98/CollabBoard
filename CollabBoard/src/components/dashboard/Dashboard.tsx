@@ -2,17 +2,31 @@ import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { useBoards } from '../../hooks/useBoards';
+import { useSubscription } from '../../hooks/useSubscription';
 import { BoardCard } from './BoardCard';
 import { CreateBoardModal } from './CreateBoardModal';
+import { ProfilePanel } from '../profile/ProfilePanel';
+import { hashColor } from '../../utils/cursor';
 import './Dashboard.css';
 
 type Tab = 'my-boards' | 'join-board';
 
+function getInitials(name: string): string {
+  if (!name) return '?';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+  return name.slice(0, 2).toUpperCase();
+}
+
 export function Dashboard() {
   const { user, logout } = useAuth();
   const { myBoards, joinableBoards, loading, createBoard, joinBoard, deleteBoard } = useBoards(user);
+  const { tier, aiCommandCount, subscriptionStatus, currentPeriodEnd } = useSubscription(user);
   const [activeTab, setActiveTab] = useState<Tab>('my-boards');
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [profilePanelOpen, setProfilePanelOpen] = useState(false);
   const navigate = useNavigate();
 
   const handleCreateBoard = useCallback(
@@ -56,11 +70,25 @@ export function Dashboard() {
     [deleteBoard]
   );
 
+  const avatarColor = user ? hashColor(user.uid) : '#999';
+  const initials = user ? getInitials(user.displayName || user.email) : '?';
+
   return (
     <div className="dashboard-page">
       <header className="dashboard-header">
         <div className="dashboard-brand">CollabBoard</div>
         <div className="dashboard-user-area">
+          {user && (
+            <button
+              type="button"
+              className="dashboard-profile-btn"
+              onClick={() => setProfilePanelOpen(true)}
+              aria-label="Open profile"
+              style={{ background: avatarColor }}
+            >
+              {initials}
+            </button>
+          )}
           {user && <span className="dashboard-user-name">{user.displayName || user.email}</span>}
           <button className="dashboard-logout-btn" onClick={handleLogout}>
             Logout
@@ -148,6 +176,18 @@ export function Dashboard() {
         <CreateBoardModal
           onSubmit={handleCreateBoard}
           onCancel={() => setShowCreateModal(false)}
+        />
+      )}
+
+      {user && (
+        <ProfilePanel
+          open={profilePanelOpen}
+          onClose={() => setProfilePanelOpen(false)}
+          user={user}
+          tier={tier}
+          aiCommandCount={aiCommandCount}
+          subscriptionStatus={subscriptionStatus}
+          currentPeriodEnd={currentPeriodEnd}
         />
       )}
     </div>

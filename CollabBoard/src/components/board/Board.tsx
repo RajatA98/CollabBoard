@@ -9,7 +9,10 @@ import { UndoRedoClearPanel } from './UndoRedoClearPanel';
 import { StyleBar } from './StyleBar';
 import { ContextMenu } from './ContextMenu';
 import { AICommandPanel } from './AICommandPanel';
+import { ProfilePanel } from '../profile/ProfilePanel';
+import { UpgradeModal } from '../subscription/UpgradeModal';
 import { useAuth } from '../../hooks/useAuth';
+import { useSubscription } from '../../hooks/useSubscription';
 import { useBoardObjects } from '../../hooks/useBoardObjects';
 import { useCursors } from '../../hooks/useCursors';
 import { usePresence } from '../../hooks/usePresence';
@@ -77,6 +80,9 @@ export function Board() {
     childCount: number;
   } | null>(null);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [profilePanelOpen, setProfilePanelOpen] = useState(false);
+  const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
+  const { tier, aiCommandCount, subscriptionStatus, currentPeriodEnd } = useSubscription(user);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef(viewport);
   viewportRef.current = viewport;
@@ -1453,6 +1459,8 @@ export function Board() {
         boardName={boardDisplayName}
         onBoardNameChange={handleBoardNameChange}
         onLogout={handleLogout}
+        user={user}
+        onProfileClick={() => setProfilePanelOpen(true)}
       />
       <div className="board-content">
         <ShapeSidebar
@@ -1496,7 +1504,7 @@ export function Board() {
           >
             <div className="ai-command-panel-backdrop" onClick={() => setAiPanelOpen(false)} aria-hidden />
             <div className="ai-command-panel-wrap">
-              <AICommandPanel boardId={boardId} onClose={() => setAiPanelOpen(false)} />
+              <AICommandPanel boardId={boardId} onClose={() => setAiPanelOpen(false)} onUpgradeRequired={() => { setAiPanelOpen(false); setUpgradeModalOpen(true); }} />
               <button
                 type="button"
                 className="ai-command-panel-close"
@@ -1661,6 +1669,21 @@ export function Board() {
             </div>
           </div>
         </div>
+      )}
+      {user && (
+        <ProfilePanel
+          open={profilePanelOpen}
+          onClose={() => setProfilePanelOpen(false)}
+          user={user}
+          boardId={boardId}
+          tier={tier}
+          aiCommandCount={aiCommandCount}
+          subscriptionStatus={subscriptionStatus}
+          currentPeriodEnd={currentPeriodEnd}
+        />
+      )}
+      {upgradeModalOpen && (
+        <UpgradeModal onClose={() => setUpgradeModalOpen(false)} />
       )}
     </div>
   );
