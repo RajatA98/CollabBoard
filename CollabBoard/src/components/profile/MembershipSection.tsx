@@ -19,13 +19,22 @@ export function MembershipSection({
   const [portalLoading, setPortalLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  function normalizeErrorMessage(err: unknown, fallback: string): string {
+    const message = err instanceof Error ? err.message : fallback;
+    // Firebase callables often surface backend errors as generic "internal"
+    if (/^internal$/i.test(message.trim())) {
+      return fallback;
+    }
+    return message;
+  }
+
   const handleUpgrade = async () => {
     setUpgradeLoading(true);
     setError(null);
     try {
       await redirectToCheckout();
-    } catch {
-      setError('Failed to start checkout. Please try again.');
+    } catch (err) {
+      setError(normalizeErrorMessage(err, 'Failed to start checkout. Please try again.'));
       setUpgradeLoading(false);
     }
   };
@@ -35,8 +44,8 @@ export function MembershipSection({
     setError(null);
     try {
       await redirectToPortal();
-    } catch {
-      setError('Failed to open subscription portal. Please try again.');
+    } catch (err) {
+      setError(normalizeErrorMessage(err, 'Failed to open subscription portal. Please try again.'));
       setPortalLoading(false);
     }
   };

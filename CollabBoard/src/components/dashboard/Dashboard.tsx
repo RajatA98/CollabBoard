@@ -21,9 +21,10 @@ function getInitials(name: string): string {
 }
 
 export function Dashboard() {
-  const { user, logout } = useAuth();
+  const { user, isAdmin, logout } = useAuth();
   const { myBoards, joinableBoards, loading, createBoard, joinBoard, deleteBoard } = useBoards(user);
   const { tier, aiCommandCount, subscriptionStatus, currentPeriodEnd } = useSubscription(user);
+  const effectiveTier = isAdmin ? 'pro' : tier;
   const [activeTab, setActiveTab] = useState<Tab>('my-boards');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [profilePanelOpen, setProfilePanelOpen] = useState(false);
@@ -184,7 +185,7 @@ export function Dashboard() {
           open={profilePanelOpen}
           onClose={() => setProfilePanelOpen(false)}
           user={user}
-          tier={tier}
+          tier={effectiveTier}
           aiCommandCount={aiCommandCount}
           subscriptionStatus={subscriptionStatus}
           currentPeriodEnd={currentPeriodEnd}

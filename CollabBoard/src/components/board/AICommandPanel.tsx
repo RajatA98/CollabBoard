@@ -5,8 +5,14 @@ import { functions, rtdb } from '../../firebase/config';
 
 interface AICommandPanelProps {
   boardId: string;
+  /** Current user uid for per-user AI lock/cancel (allows Stripe + multiple users to use AI simultaneously). */
+  userId?: string | null;
   onClose?: () => void;
   onUpgradeRequired?: () => void;
+  /** Subscription tier — used for client-side limit pre-check before calling the server. */
+  tier?: 'free' | 'pro';
+  /** Number of AI commands used today — used for client-side limit pre-check. */
+  aiCommandCount?: number;
 }
 
 type PanelState = 'idle' | 'loading' | 'success' | 'locked' | 'error';
@@ -96,7 +102,7 @@ function generateId(): string {
   return Math.random().toString(36).slice(2, 12);
 }
 
-export function AICommandPanel({ boardId, onUpgradeRequired }: AICommandPanelProps) {
+export function AICommandPanel({ boardId, userId, onUpgradeRequired, tier, aiCommandCount }: AICommandPanelProps) {
   const [input, setInput] = useState('');
   const [pastedImages, setPastedImages] = useState<PastedImage[]>([]);
   const [state, setState] = useState<PanelState>('idle');
@@ -125,15 +131,19 @@ export function AICommandPanel({ boardId, onUpgradeRequired }: AICommandPanelPro
     };
   }, []);
 
-  // Listen for aiLock so we can show "Stop AI" after refresh (run still going on backend)
+  // Listen for this user's aiLock so we can show "Stop AI" after refresh (per-user allows Stripe + multiple users simultaneously)
   useEffect(() => {
-    const lockRef = ref(rtdb, `boards/${boardId}/aiLock`);
+    if (!userId) {
+      setAiLockPresent(false);
+      return undefined;
+    }
+    const lockRef = ref(rtdb, `boards/${boardId}/aiLock/${userId}`);
     const unsubscribe = onValue(lockRef, (snap) => {
       setAiLockPresent(snap.exists());
       if (!snap.exists()) setStopRequestedAt(null);
     });
     return unsubscribe;
-  }, [boardId]);
+  }, [boardId, userId]);
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     const item = Array.from(e.clipboardData?.items ?? []).find((item) => item.type.startsWith('image/'));
@@ -162,6 +172,24 @@ export function AICommandPanel({ boardId, onUpgradeRequired }: AICommandPanelPro
   const handleSubmit = useCallback(async () => {
     const raw = input.trim();
     if ((!raw && pastedImages.length === 0) || state === 'loading') return;
+
+    // Client-side daily limit check for free tier — instant feedback without a server round-trip
+    if (tier === 'free' && (aiCommandCount ?? 0) >= 3) {
+      setMessages((prev) => [
+        ...prev,
+        { role: 'user', content: raw || '(image)' },
+        {
+          role: 'assistant',
+          content: "You've reached your daily limit of 3 free AI commands. Upgrade to Pro for unlimited access.",
+          status: 'error',
+        },
+      ]);
+      setState('error');
+      setInput('');
+      setPastedImages([]);
+      if (onUpgradeRequired) onUpgradeRequired();
+      return;
+    }
 
     // Multiple commands sequentially (Cursor-style): newline-separated lines become commands[]
     const lines = raw.split(/\n/).map((s) => s.trim()).filter(Boolean);
@@ -270,7 +298,7 @@ export function AICommandPanel({ boardId, onUpgradeRequired }: AICommandPanelPro
         }
         content = "You've used all 3 free AI commands. Upgrade to Pro for unlimited access.";
       } else if (error.code === 'functions/resource-exhausted') {
-        content = 'AI is busy on this board. Try again in a moment.';
+        content = 'You already have an AI command running on this board. Wait or stop it.';
         status = 'locked';
       }
       setState(status === 'locked' ? 'locked' : 'error');
@@ -283,8 +311,9 @@ export function AICommandPanel({ boardId, onUpgradeRequired }: AICommandPanelPro
   }, [input, pastedImages, state, boardId]);
 
   const handleStop = useCallback(() => {
+    if (!userId) return;
     setStopRequestedAt(Date.now());
-    set(ref(rtdb, `boards/${boardId}/aiCancel`), true).catch((err) => {
+    set(ref(rtdb, `boards/${boardId}/aiCancel/${userId}`), true).catch((err) => {
       console.error('Failed to send stop signal:', err);
       setStopRequestedAt(null);
       setMessages((prev) => {
@@ -301,7 +330,7 @@ export function AICommandPanel({ boardId, onUpgradeRequired }: AICommandPanelPro
     if (state === 'loading') {
       cancelRejectRef.current?.(new Error('cancelled'));
     }
-  }, [state, boardId]);
+  }, [state, boardId, userId]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {

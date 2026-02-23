@@ -5,6 +5,22 @@ import {defineSecret} from "firebase-functions/params";
 
 const stripeSecretKey = defineSecret("STRIPE_SECRET_KEY");
 
+/** Resolve Stripe secret; use .env when running in emulator. */
+function getStripeSecret(): string {
+  try {
+    const v = stripeSecretKey.value();
+    if (v) return v;
+  } catch {
+    // Emulator may not have secret; fall back to process.env
+  }
+  const env = process.env.STRIPE_SECRET_KEY;
+  if (env) return env;
+  throw new HttpsError(
+    "failed-precondition",
+    "Stripe is not configured. Set STRIPE_SECRET_KEY in .env (local) or Secret Manager (deployed)."
+  );
+}
+
 export const createPortalSession = onCall(
   {
     secrets: [stripeSecretKey],
@@ -18,13 +34,29 @@ export const createPortalSession = onCall(
     const {returnUrl} = request.data as {returnUrl?: string};
 
     const firestore = admin.firestore();
-    const userSnap = await firestore.doc(`users/${uid}`).get();
+    const userRef = firestore.doc(`users/${uid}`);
+    let userSnap = await userRef.get();
 
+    // Create user profile if missing so we don't throw "User profile not found"
     if (!userSnap.exists) {
-      throw new HttpsError("not-found", "User profile not found.");
+      const now = Date.now();
+      const email = (request.auth.token.email as string) ?? "";
+      const displayName = (request.auth.token.name as string) ?? "";
+      await userRef.set({
+        email,
+        displayName,
+        subscriptionTier: "free",
+        aiCommandCount: 0,
+        lastResetAt: now,
+        createdAt: now,
+      });
+      userSnap = await userRef.get();
     }
 
-    const userData = userSnap.data()!;
+    const userData = userSnap.data();
+    if (!userData) {
+      throw new HttpsError("not-found", "User profile not found.");
+    }
     const customerId = userData.stripeCustomerId as string | undefined;
 
     if (!customerId) {
@@ -34,7 +66,7 @@ export const createPortalSession = onCall(
       );
     }
 
-    const stripe = new Stripe(stripeSecretKey.value());
+    const stripe = new Stripe(getStripeSecret());
 
     const session = await stripe.billingPortal.sessions.create({
       customer: customerId,

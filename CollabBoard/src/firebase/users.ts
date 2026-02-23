@@ -20,6 +20,9 @@ export async function ensureUserDoc(
       createdAt: Date.now(),
     };
     await setDoc(userRef, newDoc);
+  } else if (!snap.data().displayName && displayName) {
+    // Backfill displayName that was saved as empty due to the onAuthStateChanged race condition
+    await updateDoc(userRef, { displayName });
   }
 }
 

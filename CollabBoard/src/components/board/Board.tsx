@@ -31,7 +31,7 @@ function generateId() {
 
 export function Board() {
   const { boardId = 'default' } = useParams();
-  const { user, logout } = useAuth();
+  const { user, isAdmin, logout } = useAuth();
   const { objects, addObject, updateObject, batchUpdateObjects, deleteObject, clearObjects, markDragging, unmarkDragging } = useBoardObjects(boardId);
   const { cursors, updateCursor, cleanupCursor } = useCursors(boardId, user);
   const { onlineUsers, cleanupPresence } = usePresence(boardId, user, cursors);
@@ -83,6 +83,7 @@ export function Board() {
   const [profilePanelOpen, setProfilePanelOpen] = useState(false);
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const { tier, aiCommandCount, subscriptionStatus, currentPeriodEnd } = useSubscription(user);
+  const effectiveTier = isAdmin ? 'pro' : tier;
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef(viewport);
   viewportRef.current = viewport;
@@ -1504,7 +1505,7 @@ export function Board() {
           >
             <div className="ai-command-panel-backdrop" onClick={() => setAiPanelOpen(false)} aria-hidden />
             <div className="ai-command-panel-wrap">
-              <AICommandPanel boardId={boardId} onClose={() => setAiPanelOpen(false)} onUpgradeRequired={() => { setAiPanelOpen(false); setUpgradeModalOpen(true); }} />
+              <AICommandPanel boardId={boardId} userId={user?.uid ?? null} onClose={() => setAiPanelOpen(false)} onUpgradeRequired={() => { setAiPanelOpen(false); setUpgradeModalOpen(true); }} tier={effectiveTier} aiCommandCount={aiCommandCount} />
               <button
                 type="button"
                 className="ai-command-panel-close"
@@ -1676,7 +1677,7 @@ export function Board() {
           onClose={() => setProfilePanelOpen(false)}
           user={user}
           boardId={boardId}
-          tier={tier}
+          tier={effectiveTier}
           aiCommandCount={aiCommandCount}
           subscriptionStatus={subscriptionStatus}
           currentPeriodEnd={currentPeriodEnd}

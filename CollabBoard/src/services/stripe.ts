@@ -14,6 +14,8 @@ export async function redirectToCheckout(): Promise<void> {
   const { url } = result.data as { url: string };
   if (url) {
     window.location.href = url;
+  } else {
+    throw new Error('No checkout URL returned. Please try again.');
   }
 }
 
@@ -26,5 +28,7 @@ export async function redirectToPortal(): Promise<void> {
   const { url } = result.data as { url: string };
   if (url) {
     window.location.href = url;
+  } else {
+    throw new Error('No portal URL returned. Please try again.');
   }
 }

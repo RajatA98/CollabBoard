@@ -15,8 +15,9 @@ export function UpgradeModal({ onClose }: UpgradeModalProps) {
     setError(null);
     try {
       await redirectToCheckout();
-    } catch {
-      setError('Failed to start checkout. Please try again.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to start checkout. Please try again.';
+      setError(message);
       setLoading(false);
     }
   };

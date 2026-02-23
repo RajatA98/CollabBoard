@@ -18,6 +18,10 @@ try {
   if (!process.env.ANTHROPIC_API_KEY) {
     loadEnv({path: path.join(cwd, "..", ".env")});
   }
+  // When emulator runs from functions/, Stripe keys may be in repo root .env only
+  if (!process.env.STRIPE_SECRET_KEY) {
+    loadEnv({path: path.join(cwd, "..", ".env")});
+  }
 } catch {
   // Ignore; production uses Secret Manager, not .env
 }
@@ -65,10 +69,34 @@ export const aiCommand = onCall(
     const firestore = admin.firestore();
     const userDocRef = firestore.doc(`users/${request.auth.uid}`);
     const userSnap = await userDocRef.get();
-    const userData = userSnap.exists ? userSnap.data()! : null;
-    const tier = (userData?.subscriptionTier as string) || "free";
+    let userData: Record<string, unknown> | null = userSnap.exists ? (userSnap.data() ?? null) : null;
 
-    if (tier === "free") {
+    // Ensure user doc exists so free-tier reset/increment don't fail (fixes "internal error" on first AI command)
+    if (!userSnap.exists) {
+      const now = Date.now();
+      const email = (request.auth.token.email as string) ?? "";
+      const displayName = (request.auth.token.name as string) ?? "";
+      await userDocRef.set({
+        email,
+        displayName,
+        subscriptionTier: "free",
+        aiCommandCount: 0,
+        lastResetAt: now,
+        createdAt: now,
+      });
+      userData = {
+        subscriptionTier: "free",
+        aiCommandCount: 0,
+        lastResetAt: now,
+      };
+    }
+
+    const tier = (userData?.subscriptionTier as string) || "free";
+    // Admins (custom claim admin: true) get Pro-style access without paying
+    const isAdmin = request.auth.token.admin === true;
+    const effectiveTier = isAdmin ? "pro" : tier;
+
+    if (effectiveTier === "free") {
       let count = (userData?.aiCommandCount as number) || 0;
       const lastReset = (userData?.lastResetAt as number) || 0;
 
@@ -132,8 +160,9 @@ export const aiCommand = onCall(
       ? commandList
       : [singleCommand || (hasImage ? "What do you see in this image? Describe or create shapes based on it." : "")];
 
-    // AI lock — prevent concurrent agent runs on the same board
-    const lockRef = rtdb.ref(`boards/${boardId}/aiLock`);
+    // AI lock — per-user so Stripe flows and multiple users can use AI simultaneously on the same board
+    const userId = request.auth.uid;
+    const lockRef = rtdb.ref(`boards/${boardId}/aiLock/${userId}`);
     const lockSnap = await lockRef.get();
 
     if (lockSnap.exists()) {
@@ -141,19 +170,19 @@ export const aiCommand = onCall(
       if (Date.now() - lock.startedAt < 30000) {
         throw new HttpsError(
           "resource-exhausted",
-          "AI is already processing a command for this board. Please wait."
+          "You already have an AI command running on this board. Please wait or stop it."
         );
       }
     }
 
     const lockLabel = toRun.length > 1 ? `${toRun.length} commands` : (toRun[0] || (hasImage ? "(image)" : ""));
     await lockRef.set({
-      userId: request.auth.uid,
+      userId,
       command: lockLabel,
       startedAt: Date.now(),
     });
 
-    const cancelRef = rtdb.ref(`boards/${boardId}/aiCancel`);
+    const cancelRef = rtdb.ref(`boards/${boardId}/aiCancel/${userId}`);
     await cancelRef.remove();
 
     const checkCancel = async (): Promise<boolean> => {
@@ -206,7 +235,7 @@ export const aiCommand = onCall(
       }
 
       // Increment AI command count for free-tier users after successful execution
-      if (tier === "free" && !cancelled) {
+      if (effectiveTier === "free" && !cancelled) {
         await userDocRef.update({
           aiCommandCount: admin.firestore.FieldValue.increment(1),
         });

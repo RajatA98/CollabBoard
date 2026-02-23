@@ -1252,7 +1252,10 @@ export async function createPenStroke(
   ]);
 
   // Compute bounding box of relative coords
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
   for (let i = 0; i < flatPts.length; i += 2) {
     if (flatPts[i] < minX) minX = flatPts[i];
     if (flatPts[i] > maxX) maxX = flatPts[i];

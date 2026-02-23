@@ -15,16 +15,43 @@
 import * as admin from "firebase-admin";
 import Stripe from "stripe";
 import {onCall, HttpsError} from "firebase-functions/v2/https";
-import {defineSecret, defineString} from "firebase-functions/params";
+import {defineSecret} from "firebase-functions/params";
 
 const stripeSecretKey = defineSecret("STRIPE_SECRET_KEY");
-const stripePriceId = defineString("STRIPE_PRO_PRICE_ID", {
-  default: "",
-});
+const stripePriceId = defineSecret("STRIPE_PRO_PRICE_ID");
+
+/** Resolve Stripe secret; use .env when running in emulator (secrets not loaded from repo .env). */
+function getStripeSecret(): string {
+  try {
+    const v = stripeSecretKey.value();
+    if (v) return v;
+  } catch {
+    // Emulator may not have secret; fall back to process.env
+  }
+  const env = process.env.STRIPE_SECRET_KEY;
+  if (env) return env;
+  throw new HttpsError(
+    "failed-precondition",
+    "Stripe is not configured. Set STRIPE_SECRET_KEY in .env (local) or Secret Manager (deployed)."
+  );
+}
+
+/** Resolve price ID; use Secret Manager in production, .env in emulator. */
+function getPriceId(): string {
+  try {
+    const v = stripePriceId.value();
+    if (v) return v;
+  } catch {
+    // Emulator may not have secret; fall back to process.env
+  }
+  const env = process.env.STRIPE_PRO_PRICE_ID;
+  if (env) return env;
+  return "";
+}
 
 export const createCheckoutSession = onCall(
   {
-    secrets: [stripeSecretKey],
+    secrets: [stripeSecretKey, stripePriceId],
   },
   async (request) => {
     if (!request.auth) {
@@ -37,19 +64,31 @@ export const createCheckoutSession = onCall(
       cancelUrl?: string;
     };
 
-    const stripe = new Stripe(stripeSecretKey.value());
+    const stripe = new Stripe(getStripeSecret());
     const firestore = admin.firestore();
     const userRef = firestore.doc(`users/${uid}`);
-    const userSnap = await userRef.get();
+    let userSnap = await userRef.get();
 
+    // Create user profile if missing (e.g. test user or first time opening Profile before ensureUserDoc ran)
     if (!userSnap.exists) {
-      throw new HttpsError(
-        "not-found",
-        "User profile not found. Please reload and try again."
-      );
+      const now = Date.now();
+      const email = (request.auth.token.email as string) ?? "";
+      const displayName = (request.auth.token.name as string) ?? "";
+      await userRef.set({
+        email,
+        displayName,
+        subscriptionTier: "free",
+        aiCommandCount: 0,
+        lastResetAt: now,
+        createdAt: now,
+      });
+      userSnap = await userRef.get();
     }
 
-    const userData = userSnap.data()!;
+    const userData = userSnap.data();
+    if (!userData) {
+      throw new HttpsError("not-found", "User profile not found. Please reload and try again.");
+    }
 
     if (userData.subscriptionTier === "pro") {
       throw new HttpsError(
@@ -70,7 +109,7 @@ export const createCheckoutSession = onCall(
       await userRef.update({stripeCustomerId: customerId});
     }
 
-    const priceId = stripePriceId.value();
+    const priceId = getPriceId();
     if (!priceId) {
       throw new HttpsError(
         "failed-precondition",
