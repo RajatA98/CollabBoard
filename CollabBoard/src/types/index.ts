@@ -95,6 +95,18 @@ export interface AppUser {
   displayName: string;
 }
 
+export interface UserDoc {
+  email: string;
+  displayName: string;
+  subscriptionTier: 'free' | 'pro';
+  aiCommandCount: number;
+  lastResetAt: number;
+  stripeCustomerId?: string;
+  subscriptionStatus?: 'active' | 'canceling' | 'expired' | 'past_due';
+  currentPeriodEnd?: number;
+  createdAt: number;
+}
+
 export interface BoardMeta {
   id: string;
   name: string;

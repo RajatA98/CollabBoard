@@ -1,0 +1,124 @@
+.upgrade-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.upgrade-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.upgrade-modal-content {
+  position: relative;
+  background: #fff;
+  border-radius: 16px;
+  padding: 40px 36px;
+  max-width: 420px;
+  width: 90%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  text-align: center;
+  animation: upgrade-modal-appear 0.2s ease-out;
+}
+
+@keyframes upgrade-modal-appear {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.upgrade-modal-icon {
+  margin-bottom: 16px;
+}
+
+.upgrade-modal-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1a1a2e;
+  margin: 0 0 8px;
+}
+
+.upgrade-modal-subtitle {
+  font-size: 14px;
+  color: #666;
+  margin: 0 0 20px;
+}
+
+.upgrade-modal-benefits {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 24px;
+  text-align: left;
+}
+
+.upgrade-modal-benefits li {
+  font-size: 14px;
+  color: #333;
+  padding: 6px 0;
+  padding-left: 24px;
+  position: relative;
+}
+
+.upgrade-modal-benefits li::before {
+  content: '\2713';
+  position: absolute;
+  left: 0;
+  color: #7c3aed;
+  font-weight: 700;
+}
+
+.upgrade-modal-error {
+  color: #dc2626;
+  font-size: 13px;
+  margin: 0 0 12px;
+}
+
+.upgrade-modal-cta {
+  display: block;
+  width: 100%;
+  padding: 12px 24px;
+  background: linear-gradient(135deg, #667eea 0%, #7c3aed 100%);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.upgrade-modal-cta:hover:not(:disabled) {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.upgrade-modal-cta:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.upgrade-modal-dismiss {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px;
+  background: none;
+  border: none;
+  color: #999;
+  font-size: 14px;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.upgrade-modal-dismiss:hover {
+  color: #666;
+}

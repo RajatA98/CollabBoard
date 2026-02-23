@@ -7,11 +7,20 @@ import {defineSecret, defineString} from "firebase-functions/params";
 import {onCall, HttpsError} from "firebase-functions/v2/https";
 import {runAgent} from "./lib/agentRunner.js";
 
+// Re-export Stripe functions
+export {createCheckoutSession} from "./stripe/createCheckoutSession.js";
+export {createPortalSession} from "./stripe/createPortalSession.js";
+export {stripeWebhook} from "./stripe/webhookHandler.js";
+
 // Load .env from repo root when running locally (emulator or Docker). Never throw so Cloud Run can start.
 try {
   const cwd = process.cwd();
   loadEnv({path: path.join(cwd, ".env")});
   if (!process.env.ANTHROPIC_API_KEY) {
+    loadEnv({path: path.join(cwd, "..", ".env")});
+  }
+  // When emulator runs from functions/, Stripe keys may be in repo root .env only
+  if (!process.env.STRIPE_SECRET_KEY) {
     loadEnv({path: path.join(cwd, "..", ".env")});
   }
 } catch {
@@ -56,6 +65,64 @@ export const aiCommand = onCall(
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Must be logged in");
     }
+
+    // --- Subscription usage guard ---
+    const firestore = admin.firestore();
+    const userDocRef = firestore.doc(`users/${request.auth.uid}`);
+    const userSnap = await userDocRef.get();
+    let userData: Record<string, unknown> | null = userSnap.exists ? (userSnap.data() ?? null) : null;
+
+    // Ensure user doc exists so free-tier reset/increment don't fail (fixes "internal error" on first AI command)
+    if (!userSnap.exists) {
+      const now = Date.now();
+      const email = (request.auth.token.email as string) ?? "";
+      const displayName = (request.auth.token.name as string) ?? "";
+      await userDocRef.set({
+        email,
+        displayName,
+        subscriptionTier: "free",
+        aiCommandCount: 0,
+        lastResetAt: now,
+        createdAt: now,
+      });
+      userData = {
+        subscriptionTier: "free",
+        aiCommandCount: 0,
+        lastResetAt: now,
+      };
+    }
+
+    const tier = (userData?.subscriptionTier as string) || "free";
+    // Admins (custom claim admin: true) get Pro-style access without paying
+    const isAdmin = request.auth.token.admin === true;
+    const effectiveTier = isAdmin ? "pro" : tier;
+
+    if (effectiveTier === "free") {
+      let count = (userData?.aiCommandCount as number) || 0;
+      const lastReset = (userData?.lastResetAt as number) || 0;
+
+      // Daily reset: if lastResetAt is before today's midnight UTC, reset the count
+      const now = new Date();
+      const todayMidnight = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+      ).getTime();
+
+      if (lastReset < todayMidnight) {
+        count = 0;
+        await userDocRef.update({
+          aiCommandCount: 0,
+          lastResetAt: Date.now(),
+        });
+      }
+
+      if (count >= 3) {
+        throw new HttpsError(
+          "permission-denied",
+          "UPGRADE_REQUIRED: You've used all 3 free AI commands for today. Upgrade to Pro for unlimited access."
+        );
+      }
+    }
+    // --- End usage guard ---
 
     const {command, commands, boardId, commandId: clientCommandId, imageBase64, imageMediaType, history} = request.data as {
       command?: string;
@@ -108,6 +175,7 @@ export const aiCommand = onCall(
       startedAt: Date.now(),
     });
 
+
     const checkCancel = async (): Promise<boolean> => {
       const snap = await commandRef.child("cancel").get();
       return snap.exists() && Boolean(snap.val());
@@ -153,6 +221,13 @@ export const aiCommand = onCall(
           {role: "user" as const, content: cmd},
           {role: "assistant" as const, content: result.reply ?? (result.objectsCreated.length > 0 ? `Created ${result.objectsCreated.length} object(s).` : "Done.")},
         ];
+      }
+
+      // Increment AI command count for free-tier users after successful execution
+      if (effectiveTier === "free" && !cancelled) {
+        await userDocRef.update({
+          aiCommandCount: admin.firestore.FieldValue.increment(1),
+        });
       }
 
       return {
