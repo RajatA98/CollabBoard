@@ -236,3 +236,21 @@ If `firebase deploy --only functions` fails with **Container Healthcheck failed*
 
 3. **Redeploy after fixes**  
    After changing code or dependencies, run `firebase deploy --only functions` again.
+
+---
+
+## 8. Admin account (no Pro payment)
+
+Admins get Pro-style AI access (unlimited commands, no daily limit) without a subscription. The backend treats any user with the Firebase Auth custom claim **`admin: true`** as Pro.
+
+**Set the admin claim**
+
+From the repo (with Firebase Admin credentials, e.g. `GOOGLE_APPLICATION_CREDENTIALS` or `gcloud auth application-default login`):
+
+```bash
+cd functions && node scripts/set-admin-claim.mjs <uid>
+```
+
+Replace `<uid>` with the user’s Firebase Auth UID (e.g. from Firebase Console → Authentication → Users, or from your app when logged in).
+
+**After setting the claim:** the user must sign out and sign back in (or refresh the ID token) so the new claim is included in `request.auth.token`.

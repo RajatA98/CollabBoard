@@ -6,7 +6,7 @@ import {objectsRef} from "./helpers.js";
  */
 export async function getBoardState(boardId: string): Promise<{
   objects: Array<Record<string, unknown> & { id: string; type: string }>;
-  counts: { total: number; stickies: number; shapes: number; frames: number; connectors: number };
+  counts: { total: number; stickies: number; shapes: number; frames: number; connectors: number; penStrokes: number };
 }> {
   const snapshot = await objectsRef(boardId).get();
   const objects = snapshot.empty
@@ -16,9 +16,11 @@ export async function getBoardState(boardId: string): Promise<{
   let shapes = 0;
   let frames = 0;
   let connectors = 0;
+  let penStrokes = 0;
   for (const obj of objects) {
     if (obj.type === "sticky") stickies++;
     else if (obj.type === "frame") frames++;
+    else if (obj.type === "pen") penStrokes++;
     else if (
       obj.type === "rectangle" ||
       obj.type === "circle" ||
@@ -46,6 +48,7 @@ export async function getBoardState(boardId: string): Promise<{
       shapes,
       frames,
       connectors,
+      penStrokes,
     },
   };
 }

@@ -6,6 +6,7 @@ import {
   toRects,
   getOriginInEmptySpace,
   assertObjectExists,
+  findContainingFrame,
 } from "./helpers.js";
 import {getBoardState} from "./boardState.js";
 import {STICKY_COLOR_HEX} from "./types.js";
@@ -22,10 +23,49 @@ const TEXT_BOX_DEFAULT_HEIGHT = 40;
 type ObstacleRect = { x: number; y: number; width: number; height: number };
 
 function stickyColorToHex(color: string): string {
+  if (color.trim().startsWith("#")) return color;
   return STICKY_COLOR_HEX[color] ?? "#FFD700";
 }
 
 type GenOrigin = { x: number; y: number };
+
+type FrameRect = { id: string; x: number; y: number; width: number; height: number };
+
+/** Extract frame rects from a board-state objects array. */
+function extractFrames(
+  objects: Array<Record<string, unknown>>
+): FrameRect[] {
+  return objects
+    .filter((o) => o.type === "frame")
+    .map((o) => ({
+      id: String(o.id),
+      x: typeof o.x === "number" ? o.x : 0,
+      y: typeof o.y === "number" ? o.y : 0,
+      width: typeof o.width === "number" ? o.width : 0,
+      height: typeof o.height === "number" ? o.height : 0,
+    }));
+}
+
+/** Fetch only the frame rects for a board (lightweight). */
+async function fetchFrames(boardId: string): Promise<FrameRect[]> {
+  const {objects} = await getBoardState(boardId);
+  return extractFrames(objects);
+}
+
+/** Resolve frame position for frame-relative placement. Throws if not a frame. */
+async function getFrameOrigin(
+  boardId: string,
+  frameId: string
+): Promise<{ x: number; y: number }> {
+  const snap = await assertObjectExists(boardId, frameId);
+  const data = snap.data() as { type?: string; x?: number; y?: number };
+  if (data.type !== "frame") {
+    throw new Error(`Object ${frameId} is not a frame`);
+  }
+  const x = typeof data.x === "number" ? data.x : 0;
+  const y = typeof data.y === "number" ? data.y : 0;
+  return {x, y};
+}
 
 /**
  * Create a sticky note. Writes frontend-compatible doc: type 'sticky', color as hex.
@@ -36,14 +76,20 @@ type GenOrigin = { x: number; y: number };
 export async function createStickyNote(
   boardId: string,
   userId: string,
-  input: { text?: string; x: number; y: number; color: string; exactPosition?: boolean },
+  input: { text?: string; x: number; y: number; color: string; exactPosition?: boolean; frameId?: string },
   additionalObstacles?: ObstacleRect[],
   genOrigin?: GenOrigin,
   zIndex?: number
 ): Promise<{ objectId: string; x: number; y: number; type: string; width: number; height: number }> {
   let x: number;
   let y: number;
-  if (input.exactPosition) {
+  let frameId: string | undefined;
+  if (input.frameId) {
+    const origin = await getFrameOrigin(boardId, input.frameId);
+    x = origin.x + input.x;
+    y = origin.y + input.y;
+    frameId = input.frameId;
+  } else if (input.exactPosition) {
     // Still apply genOrigin so drawings start in empty space; relative layout is preserved.
     x = genOrigin ? genOrigin.x + input.x : input.x;
     y = genOrigin ? genOrigin.y + input.y : input.y;
@@ -68,7 +114,7 @@ export async function createStickyNote(
   }
   const id = generateId();
   const now = Date.now();
-  const obj = {
+  const obj: Record<string, unknown> = {
     id,
     type: "sticky",
     x,
@@ -85,8 +131,15 @@ export async function createStickyNote(
     updatedAt: now,
     updatedBy: userId,
   };
+  if (frameId === undefined) {
+    const frames = await fetchFrames(boardId);
+    frameId = findContainingFrame(x, y, STICKY_WIDTH, STICKY_HEIGHT, frames);
+  }
+  if (frameId !== undefined) {
+    obj.frameId = frameId;
+  }
   await objectsRef(boardId).doc(id).set(obj);
-  return {objectId: id, x: obj.x, y: obj.y, type: "sticky", width: obj.width, height: obj.height};
+  return {objectId: id, x: obj.x as number, y: obj.y as number, type: "sticky", width: STICKY_WIDTH, height: STICKY_HEIGHT};
 }
 
 type StickySpec = {
@@ -95,6 +148,7 @@ type StickySpec = {
   y: number;
   color: string;
   exactPosition?: boolean;
+  frameId?: string;
 };
 
 /**
@@ -108,6 +162,7 @@ export async function createStickyNotes(
   input: {
     stickies: StickySpec[];
     exactPosition?: boolean;
+    frameId?: string;
     _genOrigin?: GenOrigin;
     _baseZIndex?: number;
   }
@@ -125,11 +180,22 @@ export async function createStickyNotes(
   }
 
   const defaultExact = input.exactPosition ?? true;
+  const topLevelFrameId = input.frameId;
+  const hasAnyFrameId = topLevelFrameId != null || stickies.some((s) => s.frameId != null);
   const hasNonExact = stickies.some((s) => (s.exactPosition ?? defaultExact) === false);
   let genOrigin = input._genOrigin;
   let baseZIndex = input._baseZIndex;
   let fromBoard: Array<{ x: number; y: number; width: number; height: number }> = [];
-  if (!genOrigin || baseZIndex === undefined || hasNonExact) {
+  const frameOriginCache = new Map<string, { x: number; y: number }>();
+  async function resolveFrameOrigin(fid: string): Promise<{ x: number; y: number }> {
+    let origin = frameOriginCache.get(fid);
+    if (!origin) {
+      origin = await getFrameOrigin(boardId, fid);
+      frameOriginCache.set(fid, origin);
+    }
+    return origin;
+  }
+  if ((!genOrigin || baseZIndex === undefined || hasNonExact) && !hasAnyFrameId) {
     const {objects} = await getBoardState(boardId);
     if (!genOrigin) {
       genOrigin = getOriginInEmptySpace(
@@ -160,9 +226,19 @@ export async function createStickyNotes(
       );
     }
   }
+  if (hasAnyFrameId && baseZIndex === undefined) {
+    const {objects} = await getBoardState(boardId);
+    const objectsWithZ = objects as Array<Record<string, unknown> & { zIndex?: number }>;
+    baseZIndex =
+      objectsWithZ.reduce(
+        (max: number, o) => Math.max(max, typeof o.zIndex === "number" ? o.zIndex : 0),
+        0
+      ) + 1;
+  }
   const resolvedOrigin = genOrigin ?? {x: 0, y: 0};
   const resolvedBaseZ = baseZIndex ?? 1;
   const obstacles: Array<{ x: number; y: number; width: number; height: number }> = [...fromBoard];
+  const frames = await fetchFrames(boardId);
   const now = Date.now();
   const results: Array<{ objectId: string; x: number; y: number; width: number; height: number }> = [];
   const ref = objectsRef(boardId);
@@ -171,29 +247,39 @@ export async function createStickyNotes(
 
   for (let i = 0; i < stickies.length; i++) {
     const spec = stickies[i];
-    const exact = spec.exactPosition ?? defaultExact;
+    const itemFrameId = spec.frameId ?? topLevelFrameId;
     let x: number;
     let y: number;
-    if (exact) {
-      x = resolvedOrigin.x + spec.x;
-      y = resolvedOrigin.y + spec.y;
+    let outFrameId: string | undefined;
+    if (itemFrameId) {
+      const origin = await resolveFrameOrigin(itemFrameId);
+      x = origin.x + spec.x;
+      y = origin.y + spec.y;
+      outFrameId = itemFrameId;
     } else {
-      const placed = getNonOverlappingPosition(
-        resolvedOrigin.x + spec.x,
-        resolvedOrigin.y + spec.y,
-        STICKY_WIDTH,
-        STICKY_HEIGHT,
-        obstacles,
-        20
-      );
-      x = placed.x;
-      y = placed.y;
+      const exact = spec.exactPosition ?? defaultExact;
+      if (exact) {
+        x = resolvedOrigin.x + spec.x;
+        y = resolvedOrigin.y + spec.y;
+      } else {
+        const placed = getNonOverlappingPosition(
+          resolvedOrigin.x + spec.x,
+          resolvedOrigin.y + spec.y,
+          STICKY_WIDTH,
+          STICKY_HEIGHT,
+          obstacles,
+          20
+        );
+        x = placed.x;
+        y = placed.y;
+      }
+      outFrameId = findContainingFrame(x, y, STICKY_WIDTH, STICKY_HEIGHT, frames);
     }
     obstacles.push({x, y, width: STICKY_WIDTH, height: STICKY_HEIGHT});
 
     const id = generateId();
     const zIndex = resolvedBaseZ + i;
-    const obj = {
+    const obj: Record<string, unknown> = {
       id,
       type: "sticky",
       x,
@@ -210,6 +296,9 @@ export async function createStickyNotes(
       updatedAt: now,
       updatedBy: userId,
     };
+    if (outFrameId !== undefined) {
+      obj.frameId = outFrameId;
+    }
     batch.set(ref.doc(id), obj);
     opsInBatch++;
     results.push({objectId: id, x, y, width: STICKY_WIDTH, height: STICKY_HEIGHT});
@@ -246,6 +335,7 @@ export async function createTextBox(
     width?: number;
     height?: number;
     exactPosition?: boolean;
+    frameId?: string;
   },
   additionalObstacles?: ObstacleRect[],
   genOrigin?: GenOrigin,
@@ -255,7 +345,13 @@ export async function createTextBox(
   const height = input.height ?? TEXT_BOX_DEFAULT_HEIGHT;
   let x: number;
   let y: number;
-  if (input.exactPosition) {
+  let frameId: string | undefined;
+  if (input.frameId) {
+    const origin = await getFrameOrigin(boardId, input.frameId);
+    x = origin.x + input.x;
+    y = origin.y + input.y;
+    frameId = input.frameId;
+  } else if (input.exactPosition) {
     x = genOrigin ? genOrigin.x + input.x : input.x;
     y = genOrigin ? genOrigin.y + input.y : input.y;
   } else {
@@ -279,7 +375,7 @@ export async function createTextBox(
   }
   const id = generateId();
   const now = Date.now();
-  const obj = {
+  const obj: Record<string, unknown> = {
     id,
     type: "text",
     x,
@@ -296,8 +392,15 @@ export async function createTextBox(
     updatedAt: now,
     updatedBy: userId,
   };
+  if (frameId === undefined) {
+    const frames = await fetchFrames(boardId);
+    frameId = findContainingFrame(x, y, width, height, frames);
+  }
+  if (frameId !== undefined) {
+    obj.frameId = frameId;
+  }
   await objectsRef(boardId).doc(id).set(obj);
-  return {objectId: id, x: obj.x, y: obj.y, type: "text", width: obj.width, height: obj.height};
+  return {objectId: id, x: obj.x as number, y: obj.y as number, type: "text", width, height};
 }
 
 type TextBoxSpec = {
@@ -307,6 +410,7 @@ type TextBoxSpec = {
   width?: number;
   height?: number;
   exactPosition?: boolean;
+  frameId?: string;
 };
 
 /**
@@ -318,6 +422,7 @@ export async function createTextBoxes(
   input: {
     textBoxes: TextBoxSpec[];
     exactPosition?: boolean;
+    frameId?: string;
     _genOrigin?: GenOrigin;
     _baseZIndex?: number;
   }
@@ -335,11 +440,22 @@ export async function createTextBoxes(
   }
 
   const defaultExact = input.exactPosition ?? true;
+  const topLevelFrameId = input.frameId;
+  const hasAnyFrameId = topLevelFrameId != null || textBoxes.some((s) => s.frameId != null);
   const hasNonExact = textBoxes.some((s) => (s.exactPosition ?? defaultExact) === false);
   let genOrigin = input._genOrigin;
   let baseZIndex = input._baseZIndex;
   let fromBoard: Array<{ x: number; y: number; width: number; height: number }> = [];
-  if (!genOrigin || baseZIndex === undefined || hasNonExact) {
+  const frameOriginCache = new Map<string, { x: number; y: number }>();
+  async function resolveFrameOrigin(fid: string): Promise<{ x: number; y: number }> {
+    let origin = frameOriginCache.get(fid);
+    if (!origin) {
+      origin = await getFrameOrigin(boardId, fid);
+      frameOriginCache.set(fid, origin);
+    }
+    return origin;
+  }
+  if ((!genOrigin || baseZIndex === undefined || hasNonExact) && !hasAnyFrameId) {
     const {objects} = await getBoardState(boardId);
     if (!genOrigin) {
       genOrigin = getOriginInEmptySpace(
@@ -370,9 +486,19 @@ export async function createTextBoxes(
       );
     }
   }
+  if (hasAnyFrameId && baseZIndex === undefined) {
+    const {objects} = await getBoardState(boardId);
+    const objectsWithZ = objects as Array<Record<string, unknown> & { zIndex?: number }>;
+    baseZIndex =
+      objectsWithZ.reduce(
+        (max: number, o) => Math.max(max, typeof o.zIndex === "number" ? o.zIndex : 0),
+        0
+      ) + 1;
+  }
   const resolvedOrigin = genOrigin ?? {x: 0, y: 0};
   const resolvedBaseZ = baseZIndex ?? 1;
   const obstacles: Array<{ x: number; y: number; width: number; height: number }> = [...fromBoard];
+  const frames = await fetchFrames(boardId);
   const now = Date.now();
   const results: Array<{ objectId: string; x: number; y: number; width: number; height: number }> = [];
   const ref = objectsRef(boardId);
@@ -383,29 +509,39 @@ export async function createTextBoxes(
     const spec = textBoxes[i];
     const width = spec.width ?? TEXT_BOX_DEFAULT_WIDTH;
     const height = spec.height ?? TEXT_BOX_DEFAULT_HEIGHT;
-    const exact = spec.exactPosition ?? defaultExact;
+    const itemFrameId = spec.frameId ?? topLevelFrameId;
     let x: number;
     let y: number;
-    if (exact) {
-      x = resolvedOrigin.x + spec.x;
-      y = resolvedOrigin.y + spec.y;
+    let outFrameId: string | undefined;
+    if (itemFrameId) {
+      const origin = await resolveFrameOrigin(itemFrameId);
+      x = origin.x + spec.x;
+      y = origin.y + spec.y;
+      outFrameId = itemFrameId;
     } else {
-      const placed = getNonOverlappingPosition(
-        resolvedOrigin.x + spec.x,
-        resolvedOrigin.y + spec.y,
-        width,
-        height,
-        obstacles,
-        20
-      );
-      x = placed.x;
-      y = placed.y;
+      const exact = spec.exactPosition ?? defaultExact;
+      if (exact) {
+        x = resolvedOrigin.x + spec.x;
+        y = resolvedOrigin.y + spec.y;
+      } else {
+        const placed = getNonOverlappingPosition(
+          resolvedOrigin.x + spec.x,
+          resolvedOrigin.y + spec.y,
+          width,
+          height,
+          obstacles,
+          20
+        );
+        x = placed.x;
+        y = placed.y;
+      }
+      outFrameId = findContainingFrame(x, y, width, height, frames);
     }
     obstacles.push({x, y, width, height});
 
     const id = generateId();
     const zIndex = resolvedBaseZ + i;
-    const obj = {
+    const obj: Record<string, unknown> = {
       id,
       type: "text",
       x,
@@ -422,6 +558,9 @@ export async function createTextBoxes(
       updatedAt: now,
       updatedBy: userId,
     };
+    if (outFrameId !== undefined) {
+      obj.frameId = outFrameId;
+    }
     batch.set(ref.doc(id), obj);
     opsInBatch++;
     results.push({objectId: id, x, y, width, height});
@@ -461,6 +600,7 @@ export async function createShape(
     color?: string;
     waypoints?: Array<{x: number; y: number}>;
     exactPosition?: boolean;
+    frameId?: string;
   },
   additionalObstacles?: ObstacleRect[],
   genOrigin?: GenOrigin,
@@ -468,7 +608,13 @@ export async function createShape(
 ): Promise<{ objectId: string; x: number; y: number; type: string; width: number; height: number }> {
   let x: number;
   let y: number;
-  if (input.exactPosition) {
+  let frameId: string | undefined;
+  if (input.frameId) {
+    const origin = await getFrameOrigin(boardId, input.frameId);
+    x = origin.x + input.x;
+    y = origin.y + input.y;
+    frameId = input.frameId;
+  } else if (input.exactPosition) {
     // Still apply genOrigin so drawings start in empty space; relative layout is preserved.
     x = genOrigin ? genOrigin.x + input.x : input.x;
     y = genOrigin ? genOrigin.y + input.y : input.y;
@@ -517,6 +663,13 @@ export async function createShape(
     updatedAt: now,
     updatedBy: userId,
   };
+  if (frameId === undefined) {
+    const frames = await fetchFrames(boardId);
+    frameId = findContainingFrame(x, y, input.width, input.height, frames);
+  }
+  if (frameId !== undefined) {
+    obj.frameId = frameId;
+  }
   if (input.shapeType === "circle" || input.shapeType === "star") {
     (obj as Record<string, unknown>).aspectRatio = 1;
   }
@@ -561,6 +714,7 @@ type ShapeSpec = {
   color?: string;
   waypoints?: Array<{ x: number; y: number }>;
   exactPosition?: boolean;
+  frameId?: string;
 };
 
 /**
@@ -575,6 +729,7 @@ export async function createShapes(
   input: {
     shapes: ShapeSpec[];
     exactPosition?: boolean;
+    frameId?: string;
     _genOrigin?: GenOrigin;
     _baseZIndex?: number;
   }
@@ -592,11 +747,22 @@ export async function createShapes(
   }
 
   const defaultExact = input.exactPosition ?? true;
+  const topLevelFrameId = input.frameId;
+  const hasAnyFrameId = topLevelFrameId != null || shapes.some((s) => s.frameId != null);
   const hasNonExact = shapes.some((s) => (s.exactPosition ?? defaultExact) === false);
   let genOrigin = input._genOrigin;
   let baseZIndex = input._baseZIndex;
   let fromBoard: Array<{ x: number; y: number; width: number; height: number }> = [];
-  if (!genOrigin || baseZIndex === undefined || hasNonExact) {
+  const frameOriginCache = new Map<string, { x: number; y: number }>();
+  async function resolveFrameOrigin(fid: string): Promise<{ x: number; y: number }> {
+    let origin = frameOriginCache.get(fid);
+    if (!origin) {
+      origin = await getFrameOrigin(boardId, fid);
+      frameOriginCache.set(fid, origin);
+    }
+    return origin;
+  }
+  if ((!genOrigin || baseZIndex === undefined || hasNonExact) && !hasAnyFrameId) {
     const {objects} = await getBoardState(boardId);
     if (!genOrigin) {
       genOrigin = getOriginInEmptySpace(
@@ -627,9 +793,19 @@ export async function createShapes(
       );
     }
   }
+  if (hasAnyFrameId && baseZIndex === undefined) {
+    const {objects} = await getBoardState(boardId);
+    const objectsWithZ = objects as Array<Record<string, unknown> & { zIndex?: number }>;
+    baseZIndex =
+      objectsWithZ.reduce(
+        (max: number, o) => Math.max(max, typeof o.zIndex === "number" ? o.zIndex : 0),
+        0
+      ) + 1;
+  }
   const resolvedOrigin = genOrigin ?? {x: 0, y: 0};
   const resolvedBaseZ = baseZIndex ?? 1;
   const obstacles: Array<{ x: number; y: number; width: number; height: number }> = [...fromBoard];
+  const frames = await fetchFrames(boardId);
   const now = Date.now();
   const results: Array<{ objectId: string; x: number; y: number; width: number; height: number }> = [];
   const ref = objectsRef(boardId);
@@ -638,23 +814,33 @@ export async function createShapes(
 
   for (let i = 0; i < shapes.length; i++) {
     const spec = shapes[i];
-    const exact = spec.exactPosition ?? defaultExact;
+    const itemFrameId = spec.frameId ?? topLevelFrameId;
     let x: number;
     let y: number;
-    if (exact) {
-      x = resolvedOrigin.x + spec.x;
-      y = resolvedOrigin.y + spec.y;
+    let outFrameId: string | undefined;
+    if (itemFrameId) {
+      const origin = await resolveFrameOrigin(itemFrameId);
+      x = origin.x + spec.x;
+      y = origin.y + spec.y;
+      outFrameId = itemFrameId;
     } else {
-      const placed = getNonOverlappingPosition(
-        resolvedOrigin.x + spec.x,
-        resolvedOrigin.y + spec.y,
-        spec.width,
-        spec.height,
-        obstacles,
-        20
-      );
-      x = placed.x;
-      y = placed.y;
+      const exact = spec.exactPosition ?? defaultExact;
+      if (exact) {
+        x = resolvedOrigin.x + spec.x;
+        y = resolvedOrigin.y + spec.y;
+      } else {
+        const placed = getNonOverlappingPosition(
+          resolvedOrigin.x + spec.x,
+          resolvedOrigin.y + spec.y,
+          spec.width,
+          spec.height,
+          obstacles,
+          20
+        );
+        x = placed.x;
+        y = placed.y;
+      }
+      outFrameId = findContainingFrame(x, y, spec.width, spec.height, frames);
     }
     obstacles.push({x, y, width: spec.width, height: spec.height});
 
@@ -677,6 +863,9 @@ export async function createShapes(
       updatedAt: now,
       updatedBy: userId,
     };
+    if (outFrameId !== undefined) {
+      obj.frameId = outFrameId;
+    }
     if (spec.shapeType === "circle" || spec.shapeType === "star") {
       obj.aspectRatio = 1;
     }
@@ -1032,4 +1221,103 @@ export async function createConnector(
   }
   await objectsRef(boardId).doc(id).set(obj);
   return {objectId: id, type: "connector"};
+}
+
+/**
+ * Draw a single freehand pen stroke on the board.
+ * Points are provided as absolute board coordinates; internally they are
+ * stored relative to the stroke's origin (first point / bounding-box offset)
+ * to match the format the frontend canvas uses.
+ */
+export async function createPenStroke(
+  boardId: string,
+  userId: string,
+  input: {
+    points: Array<{x: number; y: number}>;
+    color: string;
+    strokeWidth?: number;
+    zIndex?: number;
+  }
+): Promise<{objectId: string; type: string}> {
+  if (!input.points || input.points.length < 2) {
+    throw new Error("createPenStroke: at least 2 points are required.");
+  }
+
+  // Convert absolute points to a flat relative array (origin = first point)
+  const originX = input.points[0].x;
+  const originY = input.points[0].y;
+  const flatPts: number[] = input.points.flatMap((p) => [
+    p.x - originX,
+    p.y - originY,
+  ]);
+
+  // Compute bounding box of relative coords
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (let i = 0; i < flatPts.length; i += 2) {
+    if (flatPts[i] < minX) minX = flatPts[i];
+    if (flatPts[i] > maxX) maxX = flatPts[i];
+    if (flatPts[i + 1] < minY) minY = flatPts[i + 1];
+    if (flatPts[i + 1] > maxY) maxY = flatPts[i + 1];
+  }
+
+  const id = generateId();
+  const now = Date.now();
+  const obj: Record<string, unknown> = {
+    id,
+    type: "pen",
+    x: originX,
+    y: originY,
+    width: Math.max(maxX - minX, 1),
+    height: Math.max(maxY - minY, 1),
+    rotation: 0,
+    color: input.color,
+    strokeWidth: input.strokeWidth ?? 4,
+    points: flatPts,
+    zIndex: input.zIndex ?? 0,
+    createdBy: userId,
+    createdAt: now,
+    updatedAt: now,
+    updatedBy: userId,
+  };
+
+  await objectsRef(boardId).doc(id).set(obj);
+  return {objectId: id, type: "pen"};
+}
+
+const PEN_BULK_MAX = 20;
+
+/**
+ * Draw multiple freehand pen strokes in one call.
+ */
+export async function createPenStrokes(
+  boardId: string,
+  userId: string,
+  input: {
+    strokes: Array<{
+      points: Array<{x: number; y: number}>;
+      color: string;
+      strokeWidth?: number;
+      zIndex?: number;
+    }>;
+  }
+): Promise<{created: number; objectIds: string[]}> {
+  if (!input.strokes || input.strokes.length === 0) {
+    throw new Error("createPenStrokes: strokes array is required.");
+  }
+  if (input.strokes.length > PEN_BULK_MAX) {
+    throw new Error(
+      `createPenStrokes: max ${PEN_BULK_MAX} strokes per call; split into batches.`
+    );
+  }
+
+  const results: string[] = [];
+  for (const strokeSpec of input.strokes) {
+    const {objectId} = await createPenStroke(boardId, userId, strokeSpec);
+    results.push(objectId);
+  }
+
+  return {created: results.length, objectIds: results};
 }

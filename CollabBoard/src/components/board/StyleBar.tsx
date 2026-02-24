@@ -117,7 +117,13 @@ function ColorSwatchPicker({
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setHexInput(color);
+    const normalized =
+      /^#[0-9a-fA-F]{6}$/i.test(color)
+        ? color
+        : /^[0-9a-fA-F]{6}$/i.test(color)
+          ? '#' + color
+          : color;
+    setHexInput(normalized);
   }, [color]);
 
   useEffect(() => {
@@ -684,7 +690,7 @@ export function StyleBar({
         <>
           <ColorSwatchPicker
             color={selectedObject.strokeColor ?? selectedObject.color ?? '#3366ff'}
-            onChange={(c) => onUpdate({ strokeColor: c })}
+            onChange={(c) => onUpdate({ strokeColor: c, color: c })}
             label="Border color"
           />
           <div className="sb-divider" />

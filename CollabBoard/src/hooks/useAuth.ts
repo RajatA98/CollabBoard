@@ -28,6 +28,7 @@ function getAuthErrorMessage(err: unknown, fallback: string) {
 
 export function useAuth() {
   const [user, setUser] = useState<AppUser | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,8 +40,14 @@ export function useAuth() {
           email: firebaseUser.email ?? '',
           displayName: firebaseUser.displayName ?? '',
         });
+        firebaseUser.getIdTokenResult().then((tokenResult) => {
+          setIsAdmin(tokenResult.claims?.admin === true);
+        }).catch(() => {
+          setIsAdmin(false);
+        });
       } else {
         setUser(null);
+        setIsAdmin(false);
       }
       setLoading(false);
     });
@@ -64,7 +71,10 @@ export function useAuth() {
   const signup = useCallback(async (email: string, password: string, displayName: string) => {
     setError(null);
     try {
-      await signUp(email, password, displayName);
+      const firebaseUser = await signUp(email, password, displayName);
+      // updateProfile has completed by the time signUp resolves, but onAuthStateChanged
+      // fired earlier (before updateProfile) with displayName = null. Correct it now.
+      setUser({ uid: firebaseUser.uid, email: firebaseUser.email ?? '', displayName });
       return true;
     } catch (err) {
       const message = getAuthErrorMessage(err, 'Signup failed');
@@ -99,5 +109,5 @@ export function useAuth() {
     }
   }, []);
 
-  return { user, loading, error, clearError, login, signup, loginWithGoogle, logout };
+  return { user, isAdmin, loading, error, clearError, login, signup, loginWithGoogle, logout };
 }

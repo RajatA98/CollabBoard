@@ -21,6 +21,7 @@
     "firebase-functions": "^7.0.0",
     "langfuse": "^3.3.0",
     "langsmith": "^0.3.0",
+    "stripe": "^20.3.1",
     "uuid": "^11.1.0"
   },
   "devDependencies": {

@@ -7,6 +7,7 @@ import Konva from 'konva';
 interface FrameProps {
   object: BoardObject;
   isSelected: boolean;
+  isDropTarget?: boolean;
   onSelect: (additive: boolean) => void;
   onUpdate: (updates: Partial<BoardObject>) => void;
   onDoubleClick?: () => void;
@@ -19,13 +20,15 @@ interface FrameProps {
 
 const FRAME_BORDER_COLOR = '#3366ff';
 const FRAME_BORDER_COLOR_SELECTED = '#5588ff';
+const FRAME_BORDER_COLOR_DROP_TARGET = '#22cc66';
 const FRAME_BG_COLOR = 'rgba(51, 102, 255, 0.05)';
-const TITLE_BG_COLOR = '#3366ff';
+const FRAME_BG_COLOR_DROP_TARGET = 'rgba(34, 204, 102, 0.08)';
+const TITLE_BG_COLOR_DEFAULT = '#3366ff';
 const TITLE_HEIGHT = 22;
 const TITLE_PADDING = 8;
 const TITLE_FONT_SIZE = 13;
 
-export function Frame({ object, isSelected, onSelect, onUpdate, onDoubleClick, onRightClick, onDragStart, onDragMove, onDragEndExtra, remoteTransform }: FrameProps) {
+export function Frame({ object, isSelected, isDropTarget, onSelect, onUpdate, onDoubleClick, onRightClick, onDragStart, onDragMove, onDragEndExtra, remoteTransform }: FrameProps) {
   const titleTextRef = useRef<Konva.Text>(null);
   const [titleWidth, setTitleWidth] = useState(80);
 
@@ -52,8 +55,11 @@ export function Frame({ object, isSelected, onSelect, onUpdate, onDoubleClick, o
   };
 
   const title = object.text || 'Frame';
-  const borderColor = object.strokeColor ?? (isSelected ? FRAME_BORDER_COLOR_SELECTED : FRAME_BORDER_COLOR);
-  const borderWidth = object.strokeWidth ?? 2;
+  const frameColor = object.strokeColor ?? object.color ?? (isSelected ? FRAME_BORDER_COLOR_SELECTED : FRAME_BORDER_COLOR);
+  const borderColor = isDropTarget ? FRAME_BORDER_COLOR_DROP_TARGET : frameColor;
+  const titleBgColor = object.strokeColor ?? object.color ?? TITLE_BG_COLOR_DEFAULT;
+  const borderWidth = isDropTarget ? 3 : (object.strokeWidth ?? 2);
+  const bgColor = isDropTarget ? FRAME_BG_COLOR_DROP_TARGET : FRAME_BG_COLOR;
 
   return (
     <Group
@@ -78,7 +84,7 @@ export function Frame({ object, isSelected, onSelect, onUpdate, onDoubleClick, o
       <Rect
         width={object.width}
         height={object.height}
-        fill={FRAME_BG_COLOR}
+        fill={bgColor}
         cornerRadius={0}
       />
       {/* Frame border */}
@@ -95,7 +101,7 @@ export function Frame({ object, isSelected, onSelect, onUpdate, onDoubleClick, o
         y={-TITLE_HEIGHT}
         width={Math.min(titleWidth, object.width)}
         height={TITLE_HEIGHT}
-        fill={TITLE_BG_COLOR}
+        fill={titleBgColor}
         cornerRadius={[4, 4, 0, 0]}
       />
       {/* Title text */}

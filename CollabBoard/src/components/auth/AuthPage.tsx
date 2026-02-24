@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { LoginForm } from './LoginForm';
 import { SignupForm } from './SignupForm';
 import { useAuth } from '../../hooks/useAuth';
 
 export function AuthPage() {
-  const [isLogin, setIsLogin] = useState(true);
+  const [searchParams] = useSearchParams();
+  const [isLogin, setIsLogin] = useState(searchParams.get('mode') !== 'signup');
   const [message, setMessage] = useState<string | null>(null);
   const navigate = useNavigate();
   const { user, loading, login, signup, loginWithGoogle, error, clearError } = useAuth();

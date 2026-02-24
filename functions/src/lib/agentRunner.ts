@@ -12,6 +12,8 @@ import {
   createTextBox,
   createTextBoxes,
   createConnector,
+  createPenStroke,
+  createPenStrokes,
   moveObject,
   moveMultipleObjects,
   resizeObject,
@@ -20,6 +22,7 @@ import {
   rotateMultipleObjects,
   updateText,
   changeColor,
+  changeMultipleColors,
   deleteObject,
   deleteMultipleObjects,
   clearBoard,
@@ -283,7 +286,7 @@ export async function runAgent(params: {
                   ) + 1;
                 }
               }
-              const frameZ = inp.zIndex ?? ((baseZIndex ?? 1) + placedRectsThisTurn.length);
+              const frameZ = inp.zIndex ?? 0;
               result = await createFrame(boardId, userId, inp, placedRectsThisTurn, genOrigin, frameZ);
               objectsCreated.push(result.objectId);
               placedRectsThisTurn.push({
@@ -309,7 +312,7 @@ export async function runAgent(params: {
               result = await createFrames(boardId, userId, {
                 ...inp,
                 _genOrigin: genOrigin,
-                _baseZIndex: (baseZIndex ?? 1) + placedRectsThisTurn.length,
+                _baseZIndex: 0,
               });
               objectsCreated.push(...result.objectIds);
               for (const r of result.results) {
@@ -375,6 +378,16 @@ export async function runAgent(params: {
               objectsCreated.push(result.objectId);
               break;
             }
+            case "createPenStroke": {
+              result = await createPenStroke(boardId, userId, inp);
+              objectsCreated.push(result.objectId);
+              break;
+            }
+            case "createPenStrokes": {
+              result = await createPenStrokes(boardId, userId, inp);
+              objectsCreated.push(...result.objectIds);
+              break;
+            }
             case "moveObject":
               result = await moveObject(boardId, inp, userId);
               break;
@@ -398,6 +411,9 @@ export async function runAgent(params: {
               break;
             case "changeColor":
               result = await changeColor(boardId, inp, userId);
+              break;
+            case "changeMultipleColors":
+              result = await changeMultipleColors(boardId, inp, userId);
               break;
             case "deleteObject":
               result = await deleteObject(boardId, inp, userId);

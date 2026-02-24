@@ -14,6 +14,8 @@ import {
   createTextBox,
   createTextBoxes as toolsCreateTextBoxes,
   createConnector,
+  createPenStroke as toolsCreatePenStroke,
+  createPenStrokes as toolsCreatePenStrokes,
   moveObject as toolsMoveObject,
   moveMultipleObjects as toolsMoveMultipleObjects,
   resizeObject as toolsResizeObject,
@@ -22,6 +24,7 @@ import {
   rotateMultipleObjects as toolsRotateMultipleObjects,
   updateText as toolsUpdateText,
   changeColor as toolsChangeColor,
+  changeMultipleColors as toolsChangeMultipleColors,
   deleteObject as toolsDeleteObject,
   deleteMultipleObjects as toolsDeleteMultipleObjects,
   clearBoard as toolsClearBoard,
@@ -38,8 +41,10 @@ type CreateStickyNotesInput = {
     y: number;
     color: string;
     exactPosition?: boolean;
+    frameId?: string;
   }>;
   exactPosition?: boolean;
+  frameId?: string;
   _genOrigin?: { x: number; y: number };
   _baseZIndex?: number;
 };
@@ -65,8 +70,10 @@ type CreateShapesInput = {
     color?: string;
     waypoints?: Array<{ x: number; y: number }>;
     exactPosition?: boolean;
+    frameId?: string;
   }>;
   exactPosition?: boolean;
+  frameId?: string;
   _genOrigin?: { x: number; y: number };
   _baseZIndex?: number;
 };
@@ -90,8 +97,10 @@ type CreateTextBoxesInput = {
     width?: number;
     height?: number;
     exactPosition?: boolean;
+    frameId?: string;
   }>;
   exactPosition?: boolean;
+  frameId?: string;
   _genOrigin?: { x: number; y: number };
   _baseZIndex?: number;
 };
@@ -197,6 +206,14 @@ export async function changeColor(
   return toolsChangeColor(boardId, userId ?? "ai", input);
 }
 
+export async function changeMultipleColors(
+  boardId: string,
+  input: { changes: Array<{ objectId: string; color: string }> },
+  userId?: string
+) {
+  return toolsChangeMultipleColors(boardId, userId ?? "ai", input);
+}
+
 export async function deleteObject(
   boardId: string,
   input: { objectId: string },
@@ -219,4 +236,32 @@ export async function clearBoard(
   userId?: string
 ) {
   return toolsClearBoard(boardId, userId ?? "ai", input);
+}
+
+const PEN_STROKE_BULK_MAX = 20;
+
+type PenStrokeSpec = {
+  points: Array<{x: number; y: number}>;
+  color: string;
+  strokeWidth?: number;
+  zIndex?: number;
+};
+
+export async function createPenStroke(
+  boardId: string,
+  userId: string | undefined,
+  input: PenStrokeSpec
+) {
+  return toolsCreatePenStroke(boardId, userId ?? "ai", input);
+}
+
+export async function createPenStrokes(
+  boardId: string,
+  userId: string | undefined,
+  input: {strokes: PenStrokeSpec[]}
+) {
+  if ((input.strokes?.length ?? 0) > PEN_STROKE_BULK_MAX) {
+    throw new Error(`createPenStrokes: max ${PEN_STROKE_BULK_MAX} strokes per call; split into batches.`);
+  }
+  return toolsCreatePenStrokes(boardId, userId ?? "ai", input);
 }
